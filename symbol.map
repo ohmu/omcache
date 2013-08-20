@@ -4,11 +4,15 @@ OSMC_0.1
     omcache_init;
     omcache_free;
     omcache_strerror;
+
+    omcache_set_buffering;
+    omcache_reset_buffering;
     omcache_flush_buffers;
 
     omcache_set_conn_timeout;
     omcache_set_send_buffer_max_size;
     omcache_set_servers;
+    omcache_set_replication;
 
     omcache_set_dist_func;
     omcache_dist_ketama_init;
@@ -20,10 +24,12 @@ OSMC_0.1
     omcache_log_stderr;
 
     omcache_poll_fds;
+    omcache_command;
     omcache_write;
     omcache_read;
 
     omcache_noop;
+    omcache_stat;
     omcache_set;
     omcache_add;
     omcache_replace;
