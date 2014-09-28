@@ -2,7 +2,7 @@
  * omcache_cdef.h - bare c function definitions
  * for omcache.h and python cffi
  *
- * Copyright (c) 2013, Oskari Saarenmaa <os@ohmu.fi>
+ * Copyright (c) 2013-2014, Oskari Saarenmaa <os@ohmu.fi>
  * All rights reserved.
  *
  * This file is under the 2-clause BSD license.
@@ -18,6 +18,7 @@ typedef enum omcache_ret_e {
   OMCACHE_BUFFERED,
   OMCACHE_BUFFER_FULL,
   OMCACHE_NOT_FOUND,
+  OMCACHE_NO_SERVERS,
 } omcache_ret_t;
 
 typedef struct omcache_s omcache_t;
@@ -66,15 +67,30 @@ const char *omcache_strerror(omcache_t *mc, int rc);
  * @param msec Maximum time to wait for a connection.
  * @return OMCACHE_OK on success.
  */
-int omcache_set_conn_timeout(omcache_t *mc, unsigned int msec);
+int omcache_set_conn_timeout(omcache_t *mc, uint32_t msec);
 
 /**
- * Set OMcache handle's maximum buffer size.
+ * Set OMcache handle's maximum buffer size for outgoing messages.
  * @param mc OMcache handle.
- * @param size Maximum number of bytes to buffer for writes and reads.
+ * @param size Maximum number of bytes to buffer for writes.
+ *             Note that this is maximum buffer size per server.
+ *             Default is 10 megabytes.
  * @return OMCACHE_OK on success.
  */
 int omcache_set_send_buffer_max_size(omcache_t *mc, size_t size);
+
+/**
+ * Set OMcache handle's maximum buffer size for incoming messages.
+ * @param mc OMcache handle.
+ * @param size Maximum number of bytes to buffer for reads.
+ *             Note that this is maximum buffer size per server.
+ *             Default is 1056 kilobytes which is enough to handle
+ *             a response of the maximum default size (1MB) but if
+ *             memcached is run with a different maximum value length
+ *             setting this setting should be adjusted as well.
+ * @return OMCACHE_OK on success.
+ */
+int omcache_set_recv_buffer_max_size(omcache_t *mc, size_t size);
 
 /**
  * Set OMcache handle's buffering mode.
@@ -84,7 +100,7 @@ int omcache_set_send_buffer_max_size(omcache_t *mc, size_t size);
  *                omcache_flush_buffers is called.
  * @return OMCACHE_OK on success.
  */
-int omcache_set_buffering(omcache_t *mc, unsigned int enabled);
+int omcache_set_buffering(omcache_t *mc, uint32_t enabled);
 
 /**
  * Set the server(s) to use with an OMcache handle.
@@ -93,19 +109,6 @@ int omcache_set_buffering(omcache_t *mc, unsigned int enabled);
  * @return OMCACHE_OK on success.
  */
 int omcache_set_servers(omcache_t *mc, const char *servers);
-
-typedef void *(omcache_dist_init_func)(omcache_server_t **servers, size_t server_count, void *context);
-typedef void (omcache_dist_free_func)(void *context);
-typedef omcache_server_t *(omcache_dist_lookup_func)(const unsigned char *key, size_t key_len, void *context);
-void *omcache_dist_ketama_init(omcache_server_t **servers, size_t server_count, void *mc);
-void omcache_dist_ketama_free(void *ketama);
-omcache_server_t *omcache_dist_ketama_lookup(const unsigned char *key, size_t key_len, void *ketama);
-omcache_server_t *omcache_dist_modulo_lookup(const unsigned char *key, size_t key_len, void *mc);
-int omcache_set_dist_func(omcache_t *mc,
-                          omcache_dist_init_func *init_func,
-                          omcache_dist_free_func *free_func,
-                          omcache_dist_lookup_func *lookup_func,
-                          void *init_context);
 
 typedef void (omcache_log_func)(void *context, int level, const char *fmt, ...);
 void omcache_log_stderr(void *context, int level, const char *fmt, ...);
@@ -120,18 +123,7 @@ int omcache_set_log_func(omcache_t *mc, omcache_log_func *func, void *context);
  *             descriptors that were returned.
  * @return A struct pollfd array (allocated and managed by OMcache).
  */
-struct pollfd *omcache_poll_fds(omcache_t *mc, int *nfds);
-
-/**
- * Attempt to flush all unwritten bytes to the servers.
- * @param mc OMcache handle.
- * @param timeout_msec Maximum number of milliseconds to block while flushing
- *                     the buffers.  Zero means no blocking at all and a
- *                     negative value blocks indefinitely until all buffers
- *                     have been flushed.
- * @return OMCACHE_OK on success; OMCACHE_AGAIN in case of timeout.
- */
-int omcache_flush_buffers(omcache_t *mc, int timeout_msec);
+struct pollfd *omcache_poll_fds(omcache_t *mc, int *nfds, int *poll_timeout);
 
 /**
  * Clear all OMcache buffers.
@@ -141,14 +133,16 @@ int omcache_flush_buffers(omcache_t *mc, int timeout_msec);
 int omcache_reset_buffering(omcache_t *mc);
 
 /**
- * Set OMcache's replication factor.
+ * Register a callback function for memcached responses.
  * @param mc OMcache handle.
- * @param replicas Number of servers to write to in addition to the server
- *                 selected by key.  Negative replication factor causes
- *                 writes to be replicated to all servers.
- * @return OMCACHE_OK on success; OMCACHE_AGAIN in case of timeout.
+ * @param resp_cb Callback function to call for responses to requests
+ *                that did not specifically request responses when
+ *                the requests were sent.
+ * @param resp_cb_context Opaque context to pass to the callback function.
+ * @return OMCACHE_OK on success.
  */
-int omcache_set_replication(omcache_t *mc, int replicas);
+typedef void (omcache_resp_callback_func)(omcache_t *mc, int res, omcache_resp_t *resp, void *context);
+int omcache_set_response_callback(omcache_t *mc, omcache_resp_callback_func *resp_cb, void *resp_cb_context);
 
 /**
  * Write (or buffer) a message to a server selected using the key.
@@ -182,9 +176,28 @@ int omcache_write(omcache_t *mc, omcache_req_t *req);
  * @return OMCACHE_OK If all responses were received;
  *         OMCACHE_AGAIN If there is more data to read.
 */
-int omcache_read(omcache_t *mc, omcache_resp_t *resps, size_t *resp_cnt, int timeout_msec);
+int omcache_io(omcache_t *mc, int32_t timeout_msec, uint32_t req_id, omcache_resp_t *resp);
 
-int omcache_command(omcache_t *mc, omcache_req_t *req, omcache_resp_t *resp, int timeout_msec);
+/**
+ * Send a request to memcache and optionally read a response.
+ * @param mc OMcache handle.
+ * @param req An omcache_req_t struct containing at least the request header
+ *            and key and optionally data.  Note that the key must be always
+ *            present in the request even if the request type does not use a
+ *            key (for example NOOP, VERSION and STATS); in that case the
+ *            key is removed before transmission and request keylen and
+ *            bodylen are adjusted accordingly.
+ * @param resp An optional response structure to be filled with the response
+ *             to the sent request.
+ * @param timeout_msec Maximum number of milliseconds to block while waiting
+ *                     for the response.  Zero means no blocking at all and
+ *                     a negative value blocks indefinitely until at a
+ *                     response is received or an error occurs.
+ * @return OMCACHE_OK if data was successfully written;
+ *         OMCACHE_BUFFERED if data was successfully added to write buffer;
+ *         OMCACHE_BUFFER_FULL if buffer was full and data was not written.
+ */
+int omcache_command(omcache_t *mc, omcache_req_t *req, omcache_resp_t *resp, int32_t timeout_msec);
 
 // Commands
 int omcache_noop(omcache_t *mc,
@@ -196,15 +209,15 @@ int omcache_stat(omcache_t *mc,
 int omcache_set(omcache_t *mc,
                 const unsigned char *key, size_t key_len,
                 const unsigned char *value, size_t value_len,
-                time_t expiration, unsigned int flags);
+                time_t expiration, uint32_t flags);
 int omcache_add(omcache_t *mc,
                 const unsigned char *key, size_t key_len,
                 const unsigned char *value, size_t value_len,
-                time_t expiration, unsigned int flags);
+                time_t expiration, uint32_t flags);
 int omcache_replace(omcache_t *mc,
                     const unsigned char *key, size_t key_len,
                     const unsigned char *value, size_t value_len,
-                    time_t expiration, unsigned int flags);
+                    time_t expiration, uint32_t flags);
 int omcache_increment(omcache_t *mc,
                       const unsigned char *key, size_t key_len,
                       uint64_t delta, uint64_t initial,
@@ -215,3 +228,7 @@ int omcache_decrement(omcache_t *mc,
                       time_t expiration);
 int omcache_delete(omcache_t *mc,
                    const unsigned char *key, size_t key_len);
+int omcache_get(omcache_t *mc,
+                const unsigned char *key, size_t key_len,
+                const unsigned char **value, size_t *value_len,
+                uint32_t *flags);

@@ -1,4 +1,4 @@
-OSMC_0.1
+OMCACHE_0.1
 {
   global:
     omcache_init;
@@ -7,26 +7,19 @@ OSMC_0.1
 
     omcache_set_buffering;
     omcache_reset_buffering;
-    omcache_flush_buffers;
 
     omcache_set_conn_timeout;
     omcache_set_send_buffer_max_size;
+    omcache_set_recv_buffer_max_size;
     omcache_set_servers;
-    omcache_set_replication;
-
-    omcache_set_dist_func;
-    omcache_dist_ketama_init;
-    omcache_dist_ketama_free;
-    omcache_dist_ketama_lookup;
-    omcache_dist_modulo_lookup;
 
     omcache_set_log_func;
     omcache_log_stderr;
 
     omcache_poll_fds;
+    omcache_io;
     omcache_command;
     omcache_write;
-    omcache_read;
 
     omcache_noop;
     omcache_stat;
@@ -36,6 +29,7 @@ OSMC_0.1
     omcache_increment;
     omcache_decrement;
     omcache_delete;
+    omcache_get;
 
   local: *;
 };
