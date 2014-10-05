@@ -22,7 +22,6 @@ typedef enum omcache_ret_e {
 } omcache_ret_t;
 
 typedef struct omcache_s omcache_t;
-typedef struct omcache_server_s omcache_server_t;
 
 typedef struct omcache_req_s {
     void *header;
@@ -64,10 +63,28 @@ const char *omcache_strerror(omcache_t *mc, int rc);
 /**
  * Set OMcache handle's connection timeout.
  * @param mc OMcache handle.
- * @param msec Maximum time to wait for a connection.
+ * @param msec Maximum milliseconds to wait for a connection.
  * @return OMCACHE_OK on success.
  */
-int omcache_set_conn_timeout(omcache_t *mc, uint32_t msec);
+int omcache_set_connect_timeout(omcache_t *mc, uint32_t msec);
+
+/**
+ * Set OMcache handle's reconnect-after-failure timeout.
+ * @param mc OMcache handle.
+ * @param msec Number of milliseconds to wait before attempting to
+ *             reconnect to a failed node.
+ * @return OMCACHE_OK on success.
+ */
+int omcache_set_reconnect_timeout(omcache_t *mc, uint32_t msec);
+
+/**
+ * Set OMcache handle's io operation timeout.
+ * @param mc OMcache handle.
+ * @param msec Number of milliseconds to wait until IO operations
+ *             finish before declaring the node dead.
+ * @return OMCACHE_OK on success.
+ */
+int omcache_set_dead_timeout(omcache_t *mc, uint32_t msec);
 
 /**
  * Set OMcache handle's maximum buffer size for outgoing messages.
@@ -199,36 +216,54 @@ int omcache_io(omcache_t *mc, int32_t timeout_msec, uint32_t req_id, omcache_res
  */
 int omcache_command(omcache_t *mc, omcache_req_t *req, omcache_resp_t *resp, int32_t timeout_msec);
 
+/* Server info */
+typedef struct omcache_server_info_s
+{
+  char *hostname;
+  int port;
+} omcache_server_info_t;
+
+omcache_server_info_t *omcache_server_info(omcache_t *mc, int list_index);
+
+omcache_server_info_t *omcache_server_info_for_key(omcache_t *mc, const unsigned char *key, size_t key_len);
+
+int omcache_server_info_free(omcache_t *mc, omcache_server_info_t *info);
+
 // Commands
 int omcache_noop(omcache_t *mc,
                  const unsigned char *key_for_server_selection,
-                 size_t key_len);
+                 size_t key_len, int32_t timeout_msec);
 int omcache_stat(omcache_t *mc,
                  const unsigned char *key_for_server_selection,
-                 size_t key_len);
+                 size_t key_len, int32_t timeout_msec);
 int omcache_set(omcache_t *mc,
                 const unsigned char *key, size_t key_len,
                 const unsigned char *value, size_t value_len,
-                time_t expiration, uint32_t flags);
+                time_t expiration, uint32_t flags,
+                uint64_t cas, int32_t timeout_msec);
 int omcache_add(omcache_t *mc,
                 const unsigned char *key, size_t key_len,
                 const unsigned char *value, size_t value_len,
-                time_t expiration, uint32_t flags);
+                time_t expiration, uint32_t flags,
+                int32_t timeout_msec);
 int omcache_replace(omcache_t *mc,
                     const unsigned char *key, size_t key_len,
                     const unsigned char *value, size_t value_len,
-                    time_t expiration, uint32_t flags);
+                    time_t expiration, uint32_t flags,
+                    int32_t timeout_msec);
 int omcache_increment(omcache_t *mc,
                       const unsigned char *key, size_t key_len,
                       uint64_t delta, uint64_t initial,
-                      time_t expiration);
+                      time_t expiration, int32_t timeout_msec);
 int omcache_decrement(omcache_t *mc,
                       const unsigned char *key, size_t key_len,
                       uint64_t delta, uint64_t initial,
-                      time_t expiration);
+                      time_t expiration, int32_t timeout_msec);
 int omcache_delete(omcache_t *mc,
-                   const unsigned char *key, size_t key_len);
+                   const unsigned char *key, size_t key_len,
+                   int32_t timeout_msec);
+int omcache_flush_all(omcache_t *mc, time_t expiration, int32_t timeout_msec);
 int omcache_get(omcache_t *mc,
                 const unsigned char *key, size_t key_len,
                 const unsigned char **value, size_t *value_len,
-                uint32_t *flags);
+                uint32_t *flags, int32_t timeout_msec);

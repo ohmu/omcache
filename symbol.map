@@ -8,7 +8,9 @@ OMCACHE_0.1
     omcache_set_buffering;
     omcache_reset_buffering;
 
-    omcache_set_conn_timeout;
+    omcache_set_connect_timeout;
+    omcache_set_reconnect_timeout;
+    omcache_set_dead_timeout;
     omcache_set_send_buffer_max_size;
     omcache_set_recv_buffer_max_size;
     omcache_set_servers;
@@ -21,6 +23,10 @@ OMCACHE_0.1
     omcache_command;
     omcache_write;
 
+    omcache_server_info;
+    omcache_server_info_by_key;
+    omcache_server_info_free;
+
     omcache_noop;
     omcache_stat;
     omcache_set;
@@ -29,6 +35,7 @@ OMCACHE_0.1
     omcache_increment;
     omcache_decrement;
     omcache_delete;
+    omcache_flush_all;
     omcache_get;
 
   local: *;
