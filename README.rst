@@ -40,15 +40,18 @@ OMcache tries to be compatible with libmemcached where possible.  During
 normal operations where all servers are available and no failovers have
 happened the two memcache clients should always select the same servers for
 keys.  Libmemcached's failover mechanism has traditionally been poorly
-documented and its details have changed occassionally between the releases
+documented and its details have changed occasionally between the releases
 so 100% compatibility is not possible.
 
 OMcache also provides a thin API compatibility wrapper header which allows
 simple applications to be converted to use OMcache instead of libmemcached
-by just including "omcache_libmemcached.h" insetad of
-"libmemcached/memcached.h".  The functionality provided by this wrapper is
-limited and it is not supported, it's provided to make it easy to test
-OMcache in simple programs that use the libmemcached API.
+by including "omcache_libmemcached.h" instead of "libmemcached/memcached.h".
+Similarly there's a compatibility layer for pylibmc in omcache_pylibmc.py
+which provides a limited pylibmc-like API for OMcache.
+
+The functionality provided by these wrappers is limited and they are not
+supported, they're provided to make it easy to test OMcache in simple
+programs that use the libmemcached or pylibmc API.
 
 License
 =======

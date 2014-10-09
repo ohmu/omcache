@@ -22,4 +22,7 @@
 void omcache_log_stderr(void *context, int level, const char *fmt, ...)
         __attribute__((format (printf, 3, 4)));
 
+// CFFI can't handle defines yet
+#define OMCACHE_DELTA_NO_ADD 0xffffffffu
+
 #endif // !_OMCACHE_H

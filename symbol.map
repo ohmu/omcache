@@ -6,7 +6,7 @@ OMCACHE_0.1
     omcache_strerror;
 
     omcache_set_buffering;
-    omcache_reset_buffering;
+    omcache_reset_buffers;
 
     omcache_set_connect_timeout;
     omcache_set_reconnect_timeout;
@@ -21,10 +21,9 @@ OMCACHE_0.1
     omcache_poll_fds;
     omcache_io;
     omcache_command;
-    omcache_write;
 
+    omcache_server_index_for_key;
     omcache_server_info;
-    omcache_server_info_by_key;
     omcache_server_info_free;
 
     omcache_noop;

@@ -42,13 +42,13 @@ typedef const char *memcached_server_distribution_t;
 
 #define memcached_create(mc) omcache_init()
 #define memcached_free(mc) omcache_free(mc)
-#define memcached_strerror omcache_strerror
+#define memcached_strerror(mc,rc) omcache_strerror(rc)
 #define memcached_flush_buffers(mc) omcache_io((mc), -1, 0, NULL)
 #define memcached_flush(mc,expire) omcache_flush_all((mc), (expire), -1)
 #define memcached_increment_with_initial(mc,key,key_len,offset,initial,expiration,val) \
-    ({ *val = 0; omcache_increment((mc), omc_cc_to_cuc(key), (key_len), (offset), (initial), (expiration), 0); })
+    omcache_increment((mc), omc_cc_to_cuc(key), (key_len), (offset), (initial), (expiration), (val), 0)
 #define memcached_decrement_with_initial(mc,key,key_len,offset,initial,expiration,val) \
-    ({ *val = 0; omcache_decrement((mc), omc_cc_to_cuc(key), (key_len), (offset), (initial), (expiration), 0); })
+    omcache_decrement((mc), omc_cc_to_cuc(key), (key_len), (offset), (initial), (expiration), (val), 0)
 #define memcached_delete(mc,key,key_len,hold) \
     ({ omc_unused_var(hold); omcache_delete((mc), omc_cc_to_cuc(key), (key_len), 0); })
 #define memcached_add(mc,key,key_len,val,val_len,exp,flags) \
@@ -59,7 +59,7 @@ typedef const char *memcached_server_distribution_t;
     omcache_replace((mc), omc_cc_to_cuc(key), (key_len), omc_cc_to_cuc(val), (val_len), (exp), (flags), 0)
 #define memcached_get(mc,key,key_len,r_len,flags,rc) \
     ({  const unsigned char *val_; \
-        *rc = omcache_get((mc), omc_cc_to_cuc(key), (key_len), &val_, (r_len), (flags), -1); \
+        *rc = omcache_get((mc), omc_cc_to_cuc(key), (key_len), &val_, (r_len), (flags), NULL, -1); \
         memcpy(malloc(*(r_len)), val_, *(r_len)); })
 
 #define memcached_servers_parse(s) strdup(s)
