@@ -4,7 +4,7 @@
  * Copyright (c) 2013-2014, Oskari Saarenmaa <os@ohmu.fi>
  * All rights reserved.
  *
- * This file is under the 2-clause BSD license.
+ * This file is under the Apache License, Version 2.0.
  * See the file `LICENSE` for details.
  *
  */

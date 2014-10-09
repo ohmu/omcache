@@ -53,8 +53,10 @@ OMcache in simple programs that use the libmemcached API.
 License
 =======
 
-OMcache is released under a 2-clause BSD license.  For the exact license
-terms, see `LICENSE` and http://opensource.org/licenses/BSD-2-Claused .
+OMcache is released under the Apache License, Version 2.0.
+
+For the exact license terms, see `LICENSE` and
+http://opensource.org/licenses/Apache-2.0 .
 
 Contact
 =======
