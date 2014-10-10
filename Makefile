@@ -16,7 +16,7 @@ $(SHLIB_SO): $(SHLIB_V)
 	ln -fs $(SHLIB_V) $(SHLIB_SO)
 
 $(SHLIB_V): $(OBJ) symbol.map
-	$(CC) $(LDFLAGS) -Wl,-soname,$(SHLIB) -Wl,-version-script,symbol.map \
+	$(CC) $(LDFLAGS) -Wl,-soname,$(SHLIB) -Wl,-version-script=symbol.map \
 		$(filter-out symbol.map,$^) -o $@ -lrt
 
 clean:

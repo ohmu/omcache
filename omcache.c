@@ -259,6 +259,19 @@ static int omc_srv_free(omcache_t *mc, omc_srv_t *srv)
   return OMCACHE_OK;
 }
 
+static int omc_srv_cmp(const omc_srv_t *s1, const omc_srv_t *s2)
+{
+  int res = strcmp(s1->hostname, s2->hostname);
+  if (res != 0)
+    return res;
+  return strcmp(s1->port, s2->port);
+}
+
+static int omc_srvp_cmp(const void *sp1, const void *sp2)
+{
+  return omc_srv_cmp(*(omc_srv_t * const *) sp1, *(omc_srv_t * const *) sp2);
+}
+
 int omcache_set_servers(omcache_t *mc, const char *servers)
 {
   omc_srv_t **srv_new = NULL;
@@ -287,17 +300,6 @@ int omcache_set_servers(omcache_t *mc, const char *servers)
     }
   free(srv_dup);
 
-  int omc_srv_cmp(const omc_srv_t *s1, const omc_srv_t *s2)
-    {
-      int res = strcmp(s1->hostname, s2->hostname);
-      if (res != 0)
-        return res;
-      return strcmp(s1->port, s2->port);
-    }
-  int omc_srvp_cmp(const void *sp1, const void *sp2)
-    {
-      return omc_srv_cmp(*(omc_srv_t * const *) sp1, *(omc_srv_t * const *) sp2);
-    }
   qsort(srv_new, srv_new_count, sizeof(*srv_new), omc_srvp_cmp);
 
   // preallocated poll-structures for all servers
@@ -466,6 +468,14 @@ static uint32_t omc_ketama_hash(const omc_srv_t *srv, uint32_t point)
   return omc_hash_jenkins_oat(name, namep - name);
 }
 
+static int omc_ketama_point_cmp(const void *v1, const void *v2)
+{
+  const omc_ketama_point_t *p1 = v1, *p2 = v2;
+  if (p1->hash_value == p2->hash_value)
+    return 0;
+  return p1->hash_value > p2->hash_value ? 1 : -1;
+}
+
 static omc_ketama_t *omc_ketama_create(omcache_t *mc)
 {
   // libmemcached ketama has 100 points per server, we use the same to be compatible
@@ -485,14 +495,7 @@ static omc_ketama_t *omc_ketama_create(omcache_t *mc)
         }
     }
 
-  int ktm_point_cmp(const void *v1, const void *v2)
-    {
-      const omc_ketama_point_t *p1 = v1, *p2 = v2;
-      if (p1->hash_value == p2->hash_value)
-        return 0;
-      return p1->hash_value > p2->hash_value ? 1 : -1;
-    }
-  qsort(ktm->points, total_points, sizeof(omc_ketama_point_t), ktm_point_cmp);
+  qsort(ktm->points, total_points, sizeof(omc_ketama_point_t), omc_ketama_point_cmp);
 
   return ktm;
 }
