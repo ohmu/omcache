@@ -12,9 +12,10 @@
 #ifndef _OMCACHE_H
 #define OMCACHE_H 1
 
-#include <poll.h>
 #include <stdarg.h>
+#include <stddef.h>
 #include <stdint.h>
+#include <sys/types.h>
 
 #include "omcache_cdef.h"
 
