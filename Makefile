@@ -41,5 +41,13 @@ ifneq ($(PYTHONDIRS),)
 	done
 endif
 
+rpm:
+	git archive --output=omcache-rpm-src.tar.gz --prefix=omcache/ HEAD
+	rpmbuild -bb omcache.spec \
+		--define '_sourcedir $(shell pwd)' \
+		--define 'major_version $(short_ver)' \
+		--define 'minor_version $(subst -,.,$(subst $(short_ver)-,,$(long_ver)))'
+	$(RM) omcache-rpm-src.tar.gz
+
 clean:
 	$(RM) $(STLIB_A) $(SHLIB_V) $(SHLIB_SO) $(OBJ)
