@@ -22,6 +22,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <sys/socket.h>
+#include <sys/syslog.h>
 #include <sys/types.h>
 #include <sys/uio.h>
 
@@ -34,18 +35,23 @@
 #define min(a,b) ({__typeof__(a) a_ = (a), b_ = (b); a_ < b_ ? a_ : b_; })
 
 
-#define omc_log(fmt,...) ({ if (mc->log_func) \
-    mc->log_func(mc, 0, "[%.03f] omcache/%s:%d: " fmt "\n", \
-                 (omc_msec() - mc->init_msec) / 1000.0, __func__, __LINE__, __VA_ARGS__); \
-    NULL; })
-#define omc_srv_log(srv,fmt,...) omc_log("[%s:%s] " fmt, (srv)->hostname, (srv)->port, __VA_ARGS__)
+#define omc_log(pri,fmt,...) ({ \
+    if (mc->log_func) { \
+      char *log_msg_; \
+      asprintf(&log_msg_, "[%.03f] omcache/%s:%d: " fmt, \
+               (omc_msec() - mc->init_msec) / 1000.0, __func__, __LINE__, __VA_ARGS__); \
+      mc->log_func(mc->log_context, (pri), log_msg_); \
+      free(log_msg_); \
+    } NULL; })
+#define omc_srv_log(pri,srv,fmt,...) \
+    omc_log(pri, "[%s:%s] " fmt, (srv)->hostname, (srv)->port, __VA_ARGS__)
 
 #ifdef DEBUG
-#  define omc_debug omc_log
-#  define omc_srv_debug omc_srv_log
+#  define omc_debug(...) omc_log(LOG_DEBUG, __VA_ARGS__)
+#  define omc_srv_debug(...) omc_srv_log(LOG_DEBUG, __VA_ARGS__)
 #else
-#  define omc_debug(fmt,...)
-#  define omc_srv_debug(srv,fmt,...)
+#  define omc_debug(...)
+#  define omc_srv_debug(...)
 #endif
 
 
@@ -198,12 +204,9 @@ static int omc_map_mc_status_to_ret_code(protocol_binary_response_status status)
 
 void omcache_log_stderr(void *context __attribute__((unused)),
                         int level __attribute__((unused)),
-                        const char *fmt, ...)
+                        const char *msg)
 {
-  va_list ap;
-  va_start(ap, fmt);
-  vfprintf(stderr, fmt, ap);
-  va_end(ap);
+  fprintf(stderr, "%s\n", msg);
 }
 
 static inline int64_t omc_msec()
@@ -341,7 +344,7 @@ int omcache_set_servers(omcache_t *mc, const char *servers)
   // reset list indexes
   for (ssize_t i=0; i<mc->server_count; i++)
     {
-      omc_srv_log(mc->servers[i], "%zd", i);
+      omc_srv_debug(mc->servers[i], "server #%zd", i);
       mc->servers[i]->list_index = i;
     }
 
@@ -523,12 +526,12 @@ static omc_srv_t *omc_ketama_lookup(omcache_t *mc, const unsigned char *key, siz
     {
       if (selected != last)
         {
-          omc_srv_log(selected->srv, "%s", "ketama skipping disabled server");
+          omc_srv_log(LOG_NOTICE, selected->srv, "%s", "ketama skipping disabled server");
           continue;
         }
       if (wrap)
         {
-          omc_log("%s", "all servers are disabled");
+          omc_log(LOG_ERR, "%s", "all servers are disabled");
           return NULL;
         }
       wrap = true;
@@ -547,7 +550,7 @@ int omcache_server_index_for_key(omcache_t *mc, const unsigned char *key, size_t
 static void
 omc_srv_reset(omcache_t *mc, omc_srv_t *srv, const char *log_msg)
 {
-  omc_srv_log(srv, "reset: %s (%s)", log_msg, strerror(errno));
+  omc_srv_log(LOG_NOTICE, srv, "reset: %s (%s)", log_msg, strerror(errno));
   if (srv->sock != -1)
     {
       close(srv->sock);
@@ -606,7 +609,7 @@ static int omc_srv_connect(omcache_t *mc, omc_srv_t *srv)
           err = getaddrinfo(srv->hostname, srv->port, &hints, &srv->addrs);
           if (err != 0)
             {
-              omc_srv_log(srv, "getaddrinfo: %s", gai_strerror(err));
+              omc_srv_log(LOG_WARNING, srv, "getaddrinfo: %s", gai_strerror(err));
               omc_srv_reset(mc, srv, "getaddrinfo failed");
               srv->addrs = NULL;
               return OMCACHE_SERVER_FAILURE;
@@ -638,7 +641,7 @@ static int omc_srv_connect(omcache_t *mc, omc_srv_t *srv)
           else if (errno == EINPROGRESS)
             {
               srv->conn_timeout = now + mc->connect_timeout_msec;
-              omc_srv_log(srv, "%s", "connection in progress");
+              omc_srv_debug(srv, "%s", "connection in progress");
               return OMCACHE_AGAIN;
             }
           else
@@ -671,7 +674,7 @@ static int omc_srv_connect(omcache_t *mc, omc_srv_t *srv)
       socklen_t err_len = sizeof(err);
       if (getsockopt(srv->sock, SOL_SOCKET, SO_ERROR, &err, &err_len) == -1)
         {
-          omc_srv_log(srv, "getsockopt failed: %s", strerror(errno));
+          omc_srv_log(LOG_WARNING, srv, "getsockopt failed: %s", strerror(errno));
           err = SO_ERROR;
         }
       if (err)
@@ -683,7 +686,7 @@ static int omc_srv_connect(omcache_t *mc, omc_srv_t *srv)
   srv->connected = true;
   srv->conn_timeout = 0;
   srv->last_io_success = omc_msec();
-  omc_srv_log(srv, "%s", "connected");
+  omc_srv_log(LOG_INFO, srv, "%s", "connected");
   omc_srv_send_noop(mc, srv, true);
   return OMCACHE_OK;
 }
@@ -940,7 +943,7 @@ int omcache_io(omcache_t *mc, int32_t timeout_msec, uint32_t req_id, omcache_res
   while (ret == OMCACHE_OK || ret == OMCACHE_AGAIN)
     {
       omc_debug("looking for %u timeout in %lld msec",
-                req_id, timeout_abs != -1 ? timeout_abs - omc_msec() : -1);
+                req_id, (long long) (timeout_abs != -1 ? timeout_abs - omc_msec() : -1));
       if (timeout_abs >= 0)
         {
           now = omc_msec();

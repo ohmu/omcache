@@ -19,10 +19,6 @@
 
 #include "omcache_cdef.h"
 
-// CFFI can't handle __attribute__ so redefine omcache_log_stderr here
-void omcache_log_stderr(void *context, int level, const char *fmt, ...)
-        __attribute__((format (printf, 3, 4)));
-
 // CFFI can't handle defines yet
 #define OMCACHE_DELTA_NO_ADD 0xffffffffu
 

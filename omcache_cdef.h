@@ -130,8 +130,8 @@ int omcache_set_buffering(omcache_t *mc, uint32_t enabled);
  */
 int omcache_set_servers(omcache_t *mc, const char *servers);
 
-typedef void (omcache_log_func)(void *context, int level, const char *fmt, ...);
-void omcache_log_stderr(void *context, int level, const char *fmt, ...);
+typedef void (omcache_log_func)(void *context, int level, const char *msg);
+void omcache_log_stderr(void *context, int level, const char *msg);
 int omcache_set_log_func(omcache_t *mc, omcache_log_func *func, void *context);
 
 // Actions

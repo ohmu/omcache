@@ -25,6 +25,13 @@ _cucpp = _ffi.new("const unsigned char **")
 
 DELTA_NO_ADD = 0xffffffff
 
+# OMcache uses sys/syslog.h priority numbers
+LOG_ERR = 3
+LOG_WARNING = 4
+LOG_NOTICE = 5
+LOG_INFO = 6
+LOG_DEBUG = 7
+
 
 class Error(Exception):
     """OMcache error"""
@@ -52,10 +59,18 @@ def _to_bytes(s):
         return s.encode("utf8")
     return s
 
+def _to_string(s):
+    msg = _ffi.string(s)
+    if version_info[0] >= 3 and isinstance(msg, bytes):
+        msg = msg.decode("utf-8")
+    return msg
+
 
 class OMcache(object):
-    def __init__(self, server_list):
+    def __init__(self, server_list, log=None):
         self.omc = _oc.omcache_init()
+        self._omc_log_cb = _ffi.callback("void(void*, int, const char *)", self._omc_log)
+        self.log = log
         self._buffering = False
         self._conn_timeout = None
         self._reconn_timeout = None
@@ -69,6 +84,27 @@ class OMcache(object):
             _oc.omcache_free(omc)
             self.omc = None
 
+    def _omc_log(self, context, level, msg):
+        msg = _to_string(msg)
+        if level <= LOG_ERR:
+            self._log.error(msg)
+        elif level == LOG_WARNING:
+            self._log.warning(msg)
+        elif level == LOG_DEBUG:
+            self._log.debug(msg)
+        else:
+            self._log.info(msg)
+
+    @property
+    def log(self):
+        return self._log
+
+    @log.setter
+    def log(self, log):
+        self._log = log
+        log_cb = self._omc_log_cb if log else _ffi.NULL
+        _oc.omcache_set_log_func(self.omc, log_cb, _ffi.NULL)
+
     @staticmethod
     def _omc_check(name, ret, return_buffer=False):
         if return_buffer:
@@ -80,9 +116,7 @@ class OMcache(object):
             raise NotFoundError
         if ret == _oc.OMCACHE_KEY_EXISTS:
             raise KeyExistsError
-        errstr = _ffi.string(_oc.omcache_strerror(ret))
-        if version_info[0] >= 3 and isinstance(errstr, bytes):
-            errstr = errstr.decode("utf-8")
+        errstr = _to_string(_oc.omcache_strerror(ret))
         raise CommandError("{0}: {1}".format(name, errstr), status=ret)
 
     def _omc_return(self, name=None, return_buffer=False):
