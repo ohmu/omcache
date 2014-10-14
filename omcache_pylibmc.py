@@ -3,10 +3,41 @@
 # Written by Oskari Saarenmaa <os@ohmu.fi>, and is placed in the public
 # domain.  The author hereby disclaims copyright to this source code.
 
+from sys import version_info
 import omcache
 import warnings
 
+
+MemcachedError = omcache.CommandError
 NotFound = omcache.NotFoundError
+
+PYLIBMC_FLAG_PICKLE = 0x01  # not supported
+PYLIBMC_FLAG_INT = 0x02
+PYLIBMC_FLAG_LONG = 0x04
+PYLIBMC_FLAG_ZLIB = 0x08  # not supported
+PYLIBMC_FLAG_BOOL = 0x10
+
+
+if version_info[0] >= 3:
+    _i_types = int
+    _u_type = str
+else:
+    _i_types = (int, long)
+    _u_type = unicode
+
+def _s_value(value):
+    flags = 0
+    if isinstance(value, bool):
+        flags |= PYLIBMC_FLAG_BOOL
+        value = str(value)
+    elif isinstance(value, _i_types):
+        flags |= PYLIBMC_FLAG_INT
+        value = str(value)
+    if isinstance(value, _u_type):
+        value = value.encode("utf-8")
+    elif not isinstance(value, bytes):
+        raise ValueError("Can't store value of type {0!r}".format(type(value)))
+    return value, flags
 
 
 class Client(omcache.OMcache):
@@ -18,23 +49,38 @@ class Client(omcache.OMcache):
         super(Client, self).__init__(servers)
         if behaviors:
             for k, v in behaviors.items():
-                if k == "ketama":
+                if k in ("cas", "no_block", "remove_failed", "auto_eject", "failure_limit"):
+                    continue
+                elif k == "dead_timeout":
+                    self.dead_timeout = v * 1000  # seconds in pylibmc
+                elif k == "retry_timeout":
+                    self.reconnect_timeout = v * 1000  # seconds in pylibmc
+                elif k == "connect_timeout":
+                    self.connect_timeout = v  # milliseconds in pylibmc
+                elif k == "ketama":
                     if not v:
                         warnings.warn("OMcache always uses ketama")
                 else:
-                    warnings.warn("OMcache does not support behavior {!r}".format(k))
+                    warnings.warn("OMcache does not support behavior {0!r}".format(k))
 
     incr = omcache.OMcache.increment
     decr = omcache.OMcache.decrement
 
-    def cas(self, key, val, cas, time=0):
-        return self.set(key, val, expiration=time, cas=cas)
-
     def get(self, key, cas=False):
         try:
-            return super(Client, self).get(key, cas)
+            value, flags, casval = super(Client, self).get(key, cas=True, flags=True)
         except NotFound:
             return None
+        if flags & (PYLIBMC_FLAG_PICKLE | PYLIBMC_FLAG_ZLIB):
+            warnings.warn("Ignoring cache value for {0!r} with unsupported flags 0x{1:x}".format(key, flags))
+            return None
+        if flags & (PYLIBMC_FLAG_INT | PYLIBMC_FLAG_LONG):
+            value = int(value)
+        elif flags & PYLIBMC_FLAG_BOOL:
+            value = bool(value)
+        if cas:
+            return (value, casval)
+        return value
 
     def gets(self, key):
         return self.get(key, cas=True)
@@ -45,12 +91,39 @@ class Client(omcache.OMcache):
         # XXX: do something different, don't block for each key
         result = {}
         for key in keys:
-            try:
-                value = self.get("{}{}".format(key_prefix or "", key))
-            except NotFound:
-                continue
-            result[key] = value
+            value = self.get("{0}{1}".format(key_prefix or "", key))
+            if value is not None:
+                result[key] = value
         return result
+
+    def set(self, key, value, time=0):
+        value, flags = _s_value(value)
+        super(Client, self).set(key, value, expiration=time, flags=flags)
+        return True
+
+    def add(self, key, value, time=0):
+        value, flags = _s_value(value)
+        try:
+            super(Client, self).add(key, value, expiration=time, flags=flags)
+            return True
+        except omcache.KeyExistsError:
+            return False
+
+    def cas(self, key, value, cas, time=0):
+        value, flags = _s_value(value)
+        try:
+            super(Client, self).set(key, value, expiration=time, cas=cas, flags=flags)
+            return True
+        except omcache.KeyExistsError:
+            return False
+
+    def replace(self, key, value, time=0):
+        value, flags = _s_value(value)
+        try:
+            super(Client, self).replace(key, value, expiration=time, flags=flags)
+            return True
+        except omcache.NotFoundError:
+            return False
 
     def set_multi(self, mapping, time=0, key_prefix=None):
         # pylibmc's set_multi returns a list of failed keys, but we don't
@@ -58,12 +131,22 @@ class Client(omcache.OMcache):
         # response callbacks
         # XXX: handle failed sets
         failed = []
-        for key, val in mapping.items():
+        for key, value in mapping.items():
             try:
-                self.set("{}{}".format(key_prefix or "", key), val, expiration=time, timeout=0)
+                prefixed_key = "{0}{1}".format(key_prefix or "", key)
+                value, flags = _s_value(value)
+                super(Client, self).set(prefixed_key, value, flags=flags,
+                                        expiration=time, timeout=0)
             except omcache.CommandError as ex:
                 failed.append(key)
         return failed
+
+    def delete(self, key):
+        try:
+            super(Client, self).delete(key)
+            return True
+        except omcache.NotFoundError:
+            return False
 
     def delete_multi(self, keys, time=0, key_prefix=None):
         # pylibmc's delete_multi returns False if all keys weren't
@@ -75,7 +158,8 @@ class Client(omcache.OMcache):
         success = True
         for key in keys:
             try:
-                self.delete("{}{}".format(key_prefix or "", key), timeout=0)
+                prefixed_key = "{0}{1}".format(key_prefix or "", key)
+                super(Client, self).delete(prefixed_key, timeout=0)
             except omcache.CommandError as ex:
                 success = False
         return success

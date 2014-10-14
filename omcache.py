@@ -48,7 +48,7 @@ class KeyExistsError(CommandError):
 
 
 def _to_bytes(s):
-    if isinstance(s, str if version_info.major >= 3 else unicode):
+    if isinstance(s, str if version_info[0] >= 3 else unicode):
         return s.encode("utf8")
     return s
 
@@ -60,7 +60,6 @@ class OMcache(object):
         self._conn_timeout = None
         self._reconn_timeout = None
         self._dead_timeout = None
-        _oc.omcache_set_log_func(self.omc, _oc.omcache_log_stderr, _ffi.NULL)
         self.set_servers(server_list)
         self.io_timeout = 1000
 
@@ -82,9 +81,9 @@ class OMcache(object):
         if ret == _oc.OMCACHE_KEY_EXISTS:
             raise KeyExistsError
         errstr = _ffi.string(_oc.omcache_strerror(ret))
-        if version_info.major >= 3 and isinstance(errstr, bytes):
+        if version_info[0] >= 3 and isinstance(errstr, bytes):
             errstr = errstr.decode("utf-8")
-        raise CommandError("{}: {}".format(name, errstr), status=ret)
+        raise CommandError("{0}: {1}".format(name, errstr), status=ret)
 
     def _omc_return(self, name=None, return_buffer=False):
         def decorate(func):
@@ -151,13 +150,12 @@ class OMcache(object):
 
     @_omc_return("omcache_noop")
     def noop(self, server_index=0, timeout=None):
-        key = _to_bytes(key_for_server_selection)
         timeout = timeout if timeout is not None else self.io_timeout
         return _oc.omcache_noop(self.omc, server_index, timeout)
 
     @_omc_return("omcache_stat")
     def stat(self, command="", server_index=0, timeout=None):
-        key = _to_bytes(command)
+        command = _to_bytes(command)
         timeout = timeout if timeout is not None else self.io_timeout
         return _oc.omcache_stat(self.omc, command, server_index, timeout)
 
@@ -205,6 +203,7 @@ class OMcache(object):
             return (buf, _u64p[0])
 
     def increment(self, key, delta=1, initial=0, expiration=0, timeout=None):
+        key = _to_bytes(key)
         timeout = timeout if timeout is not None else self.io_timeout
         ret = _oc.omcache_increment(self.omc, key, len(key), delta, initial, expiration, _u64p, timeout)
         ret = self._omc_check("omcache_increment", ret)
@@ -213,6 +212,7 @@ class OMcache(object):
         return _u64p[0]
 
     def decrement(self, key, delta=1, initial=0, expiration=0, timeout=None):
+        key = _to_bytes(key)
         timeout = timeout if timeout is not None else self.io_timeout
         ret = _oc.omcache_decrement(self.omc, key, len(key), delta, initial, expiration, _u64p, timeout)
         ret = self._omc_check("omcache_decrement", ret)
