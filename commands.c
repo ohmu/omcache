@@ -18,6 +18,9 @@
 #include "memcached_protocol_binary.h"
 #include "omcache.h"
 
+#define QCMD(k) (timeout_msec ? k : k ## Q)
+
+
 int omcache_noop(omcache_t *mc, int server_index, int32_t timeout_msec)
 {
   protocol_binary_request_noop req = {.bytes = {0}};
@@ -38,7 +41,17 @@ int omcache_stat(omcache_t *mc, const char *command,
   return omcache_command(mc, &oreq, NULL, server_index, timeout_msec);
 }
 
-#define QCMD(k) (timeout_msec ? k : k ## Q)
+int omcache_flush_all(omcache_t *mc, time_t expiration, int server_index, int32_t timeout_msec)
+{
+  size_t ext_len = 4;
+  protocol_binary_request_flush req = {.bytes = {0}};
+  req.message.header.request.opcode = QCMD(PROTOCOL_BINARY_CMD_FLUSH);
+  req.message.header.request.extlen = ext_len;
+  req.message.header.request.bodylen = htobe32(ext_len);
+  req.message.body.expiration = htobe32((uint32_t) expiration);
+  omcache_req_t oreq = {.header = req.bytes, .key = NULL, .data = NULL};
+  return omcache_command(mc, &oreq, NULL, server_index, timeout_msec);
+}
 
 static int omc_set_cmd(omcache_t *mc, protocol_binary_command opcode,
                        const unsigned char *key, size_t key_len,
@@ -153,18 +166,6 @@ int omcache_delete(omcache_t *mc,
   req.message.header.request.keylen = htobe16(key_len);
   req.message.header.request.bodylen = htobe32(key_len);
   omcache_req_t oreq = {.header = req.bytes, .key = key, .data = NULL};
-  return omcache_command(mc, &oreq, NULL, -1, timeout_msec);
-}
-
-int omcache_flush_all(omcache_t *mc, time_t expiration, int32_t timeout_msec)
-{
-  size_t ext_len = 4;
-  protocol_binary_request_flush req = {.bytes = {0}};
-  req.message.header.request.opcode = QCMD(PROTOCOL_BINARY_CMD_FLUSH);
-  req.message.header.request.extlen = ext_len;
-  req.message.header.request.bodylen = htobe32(ext_len);
-  req.message.body.expiration = htobe32((uint32_t) expiration);
-  omcache_req_t oreq = {.header = req.bytes, .key = NULL, .data = NULL};
   return omcache_command(mc, &oreq, NULL, -1, timeout_msec);
 }
 

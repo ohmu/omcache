@@ -381,7 +381,7 @@ int omcache_set_dead_timeout(omcache_t *mc, uint32_t msec)
 
 int omcache_set_recv_buffer_max_size(omcache_t *mc, size_t size)
 {
-  mc->send_buffer_max = size;
+  mc->recv_buffer_max = size;
   return OMCACHE_OK;
 }
 

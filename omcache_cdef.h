@@ -217,10 +217,14 @@ omcache_server_info_t *omcache_server_info(omcache_t *mc, int server_index);
 int omcache_server_info_free(omcache_t *mc, omcache_server_info_t *info);
 
 // Commands
+
 int omcache_noop(omcache_t *mc,
                  int server_index, int32_t timeout_msec);
 int omcache_stat(omcache_t *mc, const char *command,
                  int server_index, int32_t timeout_msec);
+int omcache_flush_all(omcache_t *mc, time_t expiration,
+                      int server_index, int32_t timeout_msec);
+
 int omcache_set(omcache_t *mc,
                 const unsigned char *key, size_t key_len,
                 const unsigned char *value, size_t value_len,
@@ -249,7 +253,6 @@ int omcache_decrement(omcache_t *mc,
 int omcache_delete(omcache_t *mc,
                    const unsigned char *key, size_t key_len,
                    int32_t timeout_msec);
-int omcache_flush_all(omcache_t *mc, time_t expiration, int32_t timeout_msec);
 int omcache_get(omcache_t *mc,
                 const unsigned char *key, size_t key_len,
                 const unsigned char **value, size_t *value_len,

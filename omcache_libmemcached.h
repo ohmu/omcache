@@ -44,7 +44,11 @@ typedef const char *memcached_server_distribution_t;
 #define memcached_free(mc) omcache_free(mc)
 #define memcached_strerror(mc,rc) omcache_strerror(rc)
 #define memcached_flush_buffers(mc) omcache_io((mc), -1, 0, NULL)
-#define memcached_flush(mc,expire) omcache_flush_all((mc), (expire), -1)
+#define memcached_flush(mc,expire) ({ \
+    int srvidx_, rc_ = OMCACHE_OK; \
+    for (srvidx_ = 0; rc_ == OMCACHE_OK; srvidx_ ++) \
+        rc_ = omcache_flush_all((mc), (expire), srvidx_, -1) ; \
+    (rc_ == OMCACHE_NO_SERVERS) ? OMCACHE_OK : rc_; })
 #define memcached_increment_with_initial(mc,key,key_len,offset,initial,expiration,val) \
     omcache_increment((mc), omc_cc_to_cuc(key), (key_len), (offset), (initial), (expiration), (val), 0)
 #define memcached_decrement_with_initial(mc,key,key_len,offset,initial,expiration,val) \
