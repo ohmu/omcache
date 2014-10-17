@@ -103,7 +103,7 @@ class OMcache(object):
     def log(self, log):
         self._log = log
         log_cb = self._omc_log_cb if log else _ffi.NULL
-        _oc.omcache_set_log_func(self.omc, log_cb, _ffi.NULL)
+        _oc.omcache_set_log_callback(self.omc, log_cb, _ffi.NULL)
 
     @staticmethod
     def _omc_check(name, ret, return_buffer=False):

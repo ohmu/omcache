@@ -36,11 +36,11 @@
 
 
 #define omc_log(pri,fmt,...) ({ \
-    if (mc->log_func) { \
+    if (mc->log_cb) { \
       char *log_msg_; \
       asprintf(&log_msg_, "[%.03f] omcache/%s:%d: " fmt, \
                (omc_msec() - mc->init_msec) / 1000.0, __func__, __LINE__, __VA_ARGS__); \
-      mc->log_func(mc->log_context, (pri), log_msg_); \
+      mc->log_cb(mc->log_context, (pri), log_msg_); \
       free(log_msg_); \
     } NULL; })
 #define omc_srv_log(pri,srv,fmt,...) \
@@ -113,10 +113,10 @@ struct omcache_s
   omc_ketama_t *ketama;
 
   // settings
-  omcache_log_func *log_func;
+  omcache_log_callback_func *log_cb;
   void *log_context;
 
-  omcache_resp_callback_func *resp_cb;
+  omcache_response_callback_func *resp_cb;
   void *resp_cb_context;
 
   size_t recv_buffer_max;
@@ -354,9 +354,9 @@ int omcache_set_servers(omcache_t *mc, const char *servers)
   return OMCACHE_OK;
 }
 
-int omcache_set_log_func(omcache_t *mc, omcache_log_func *func, void *context)
+int omcache_set_log_callback(omcache_t *mc, omcache_log_callback_func *func, void *context)
 {
-  mc->log_func = func;
+  mc->log_cb = func;
   mc->log_context = context;
   return OMCACHE_OK;
 }
@@ -391,7 +391,7 @@ int omcache_set_send_buffer_max_size(omcache_t *mc, size_t size)
   return OMCACHE_OK;
 }
 
-int omcache_set_response_callback(omcache_t *mc, omcache_resp_callback_func *resp_cb, void *resp_cb_context)
+int omcache_set_response_callback(omcache_t *mc, omcache_response_callback_func *resp_cb, void *resp_cb_context)
 {
   mc->resp_cb = resp_cb;
   mc->resp_cb_context = resp_cb_context;
