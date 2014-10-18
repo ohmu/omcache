@@ -1,0 +1,4 @@
+usr/include/omcache.h
+usr/include/omcache_cdef.h
+usr/include/omcache_libmemcached.h
+usr/lib/libomcache.so

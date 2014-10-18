@@ -49,5 +49,10 @@ rpm:
 		--define 'minor_version $(subst -,.,$(subst $(short_ver)-,,$(long_ver)))'
 	$(RM) omcache-rpm-src.tar.gz
 
+deb:
+	cp debian/changelog.in debian/changelog
+	dch -v $(long_ver) "Automatically built package"
+	dpkg-buildpackage -uc -us
+
 clean:
 	$(RM) $(STLIB_A) $(SHLIB_V) $(SHLIB_SO) $(OBJ)

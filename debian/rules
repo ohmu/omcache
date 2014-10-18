@@ -1,0 +1,24 @@
+#!/usr/bin/make -f
+
+DEB_MAKE_INSTALL_TARGET = install DESTDIR=$(DEB_DESTDIR) PREFIX=/usr
+
+include /usr/share/cdbs/1/rules/debhelper.mk
+include /usr/share/cdbs/1/class/makefile.mk
+
+install/python-omcache::
+	pyversions -s | sed -e 's-python--g' -e 's- -,-g' > $(CURDIR)/debian/pyversions
+	$(RM) $(CURDIR)/debian/python-omcache.install
+	for pyver in $(shell pyversions -s); do \
+		mkdir -p $(CURDIR)/debian/tmp/usr/lib/$$pyver/site-packages; \
+		install --mode=0644 omcache_cdef.h omcache.py omcache_pylibmc.py \
+			$(CURDIR)/debian/tmp/usr/lib/$$pyver/site-packages/; \
+		echo usr/lib/$$pyver/site-packages/omcache_cdef.h >> $(CURDIR)/debian/python-omcache.install; \
+		echo usr/lib/$$pyver/site-packages/omcache.py >> $(CURDIR)/debian/python-omcache.install; \
+		echo usr/lib/$$pyver/site-packages/omcache_pylibmc.py >> $(CURDIR)/debian/python-omcache.install; \
+	done
+
+binary-install/python-omcache::
+	dh_pysupport -p$(cdbs_curpkg)
+
+clean::
+	$(RM) debian/pyversions debian/python-omcache.install

@@ -1,0 +1,32 @@
+Source: omcache
+Section: libs
+Priority: extra
+Maintainer: Oskari Saarenmaa <os@ohmu.fi>
+Build-Depends: debhelper (>= 8), python-support
+Standards-Version: 3.9.5
+Homepage: https://github.com/saaros/omcache/
+
+Package: libomcache0
+Architecture: any
+Section: libs
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: memcache client library
+ OMcache is a low level C library for accessing memcached servers.  The goals
+ of the OMcache project are stable API and ABI and 'easy' integration into
+ complex applications and systems; OMcache specifically does not mask any
+ signals or call any blocking functions.
+
+Package: libomcache-dev
+Architecture: any
+Section: libdevel
+Depends: ${shlibs:Depends}, ${misc:Depends}, libomcache0 (= ${binary:Version})
+Description: development files for omcache
+ Development libraries and headers for the OMcache memcache client library.
+
+Package: python-omcache
+Architecture: all
+Section: python
+Depends: ${shlibs:Depends}, ${misc:Depends},
+ libomcache0 (= ${binary:Version}), python-cffi
+Description: memcached client library for python
+ Python bindings for the OMcache memcache client library.

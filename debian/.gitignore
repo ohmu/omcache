@@ -1,0 +1,16 @@
+/*.log
+/*.substvars
+/changelog
+/files
+/libomcache-dev/
+/libomcache0/
+/libomcache0.postinst.debhelper
+/libomcache0.postrm.debhelper
+/python-omcache/
+/python-omcache.install
+/python-omcache.postinst.debhelper
+/python-omcache.prerm.debhelper
+/pyversions
+/stamp-makefile-build
+/stamp-makefile-install
+/tmp/
