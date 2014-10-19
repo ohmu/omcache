@@ -1,4 +1,6 @@
-*~
 *.o
+*.pyc
+*~
+__pycache__/
 libomcache.a
 libomcache.so*
