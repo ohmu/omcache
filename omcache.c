@@ -26,8 +26,7 @@
 #include <sys/types.h>
 #include <sys/uio.h>
 
-#include "memcached_protocol_binary.h"
-#include "omcache.h"
+#include "omcache_priv.h"
 
 #define MC_PORT "11211"
 
@@ -127,15 +126,37 @@ struct omcache_s
   bool buffer_writes;
 };
 
+typedef struct omc_resp_lookup_s
+{
+  omcache_value_t *values;
+  size_t values_size;
+  // NOTE: values_returned is the number of responses we've actually been
+  // able to store to *resps.  requests_found is the number of requests
+  // we've seen some response for.  The two numbers may not match in case
+  // the requests receives more than one response (stat request, for
+  // example) or in the case the *resps buffer is too small.
+  size_t values_returned;
+  size_t requests_found;
+  size_t req_id_count;
+  uint32_t req_id_min;
+  uint32_t req_id_max;
+  omcache_req_t **requests;
+} omc_resp_lookup_t;
+
 static int omc_srv_free(omcache_t *mc, omc_srv_t *srv);
 static int omc_srv_connect(omcache_t *mc, omc_srv_t *srv);
 static int omc_srv_send_noop(omcache_t *mc, omc_srv_t *srv, bool init);
 static omc_ketama_t *omc_ketama_create(omcache_t *mc);
 static inline int64_t omc_msec();
 
+static int g_iov_max = 0;
+
 
 omcache_t *omcache_init(void)
 {
+  if (g_iov_max == 0)
+    g_iov_max = sysconf(_SC_IOV_MAX);
+
   omcache_t *mc = calloc(1, sizeof(*mc));
   mc->init_msec = omc_msec();
   mc->req_id = time(NULL);
@@ -749,8 +770,7 @@ static int omc_do_read(omcache_t *mc, omc_srv_t *srv, size_t msg_size)
 
 // read any responses returned by the server calling mc->resp_cb on them.
 // if a response's 'opaque' matches req_id store that response in *resp.
-static int omc_srv_read(omcache_t *mc, omc_srv_t *srv,
-                        uint32_t req_id, omcache_resp_t *resp)
+static int omc_srv_read(omcache_t *mc, omc_srv_t *srv, omc_resp_lookup_t *rlookup)
 {
   bool keep_buffers = false;
   int res = omc_do_read(mc, srv, 8192);
@@ -759,7 +779,7 @@ static int omc_srv_read(omcache_t *mc, omc_srv_t *srv,
   // handle as many messages as possible
   for (int i=0; srv->recv_buffer.r != srv->recv_buffer.w; i++)
     {
-      omcache_resp_t rresp = {NULL, NULL, NULL};
+      omcache_value_t value = {0};
       protocol_binary_response_header *hdr =
         (protocol_binary_response_header *) srv->recv_buffer.r;
       size_t buffered = srv->recv_buffer.w - srv->recv_buffer.r;
@@ -798,9 +818,10 @@ static int omc_srv_read(omcache_t *mc, omc_srv_t *srv,
               // discard it (by resetting connection.)
               if (mc->resp_cb)
                 {
-                  rresp.header = hdr;
-                  rresp.key = srv->recv_buffer.r + sizeof(hdr->bytes) + hdr->response.extlen;
-                  mc->resp_cb(mc, OMCACHE_BUFFER_FULL, &rresp, mc->resp_cb_context);
+                  value.status = OMCACHE_BUFFER_FULL;
+                  value.key = srv->recv_buffer.r + sizeof(hdr->bytes) + hdr->response.extlen;
+                  value.key_len = be16toh(hdr->response.keylen);
+                  mc->resp_cb(mc, &value, mc->resp_cb_context);
                 }
               errno = EMSGSIZE;
               omc_srv_reset(mc, srv, "buffer full - can't handle response");
@@ -838,26 +859,65 @@ static int omc_srv_read(omcache_t *mc, omc_srv_t *srv,
         }
 
       // setup response object
-      rresp.header = hdr;
-      rresp.key = srv->recv_buffer.r + sizeof(hdr->bytes) + hdr->response.extlen;
-      rresp.data = rresp.key + be16toh(hdr->response.keylen);
+      value.status = omc_map_mc_status_to_ret_code(be16toh(hdr->response.status));
+      value.key = srv->recv_buffer.r + sizeof(hdr->bytes) + hdr->response.extlen;
+      value.key_len = be16toh(hdr->response.keylen);
+      value.data = value.key + value.key_len;
+      value.data_len = be32toh(hdr->response.bodylen) - hdr->response.extlen - value.key_len;
+      value.cas = be64toh(hdr->response.cas);
+
+      if (hdr->response.opcode == PROTOCOL_BINARY_CMD_GET ||
+          hdr->response.opcode == PROTOCOL_BINARY_CMD_GETQ ||
+          hdr->response.opcode == PROTOCOL_BINARY_CMD_GETK ||
+          hdr->response.opcode == PROTOCOL_BINARY_CMD_GETKQ)
+        {
+          protocol_binary_response_get *gethdr =
+            (protocol_binary_response_get *) srv->recv_buffer.r;
+          value.flags = be32toh(gethdr->message.body.flags);
+        }
+
+      if (hdr->response.opcode == PROTOCOL_BINARY_CMD_INCREMENT ||
+          hdr->response.opcode == PROTOCOL_BINARY_CMD_DECREMENT ||
+          hdr->response.opcode == PROTOCOL_BINARY_CMD_INCREMENTQ ||
+          hdr->response.opcode == PROTOCOL_BINARY_CMD_DECREMENTQ)
+        {
+          protocol_binary_response_incr *incrhdr =
+            (protocol_binary_response_incr *) srv->recv_buffer.r;
+          value.delta_value = be64toh(incrhdr->message.body.value);
+        }
 
       srv->recv_buffer.r += msg_size;
 
       // pass it to response callback
       if (mc->resp_cb)
         {
-          mc->resp_cb(mc, omc_map_mc_status_to_ret_code(be16toh(hdr->response.status)),
-                      &rresp, mc->resp_cb_context);
+          mc->resp_cb(mc, &value, mc->resp_cb_context);
         }
 
-      // return if it it was requested
-      if (hdr->response.opaque == req_id && resp != NULL)
+      // return if it it was requested and we have room for the response
+      if (rlookup &&
+          hdr->response.opaque >= rlookup->req_id_min &&
+          hdr->response.opaque <= rlookup->req_id_max &&
+          rlookup->requests[hdr->response.opaque - rlookup->req_id_min])
         {
-          omc_srv_debug(srv, "got expected packet %u, not reading anymore", req_id);
-          resp->header = rresp.header;
-          resp->key = rresp.key;
-          resp->data = rresp.data;
+          omcache_req_t *req = rlookup->requests[hdr->response.opaque - rlookup->req_id_min];
+          if (req->header.magic == PROTOCOL_BINARY_REQ)
+            {
+              req->header.magic = 0; // "found"
+              rlookup->requests_found ++;
+            }
+          if (rlookup->values_size <= rlookup->values_returned)
+            {
+              omc_srv_log(LOG_WARNING, srv,
+                          "got expected packet %u but no room for it in "
+                          "response buffer of %zu entries, dropping response",
+                          hdr->response.opaque, rlookup->values_size);
+              continue;
+            }
+          omc_srv_debug(srv, "got expected packet %u (%u / %u), not reading from this socket anymore",
+                        hdr->response.opaque, hdr->response.opaque - rlookup->req_id_min,
+                        rlookup->req_id_max - rlookup->req_id_min + 1);
+          rlookup->values[rlookup->values_returned++] = value;
           // don't overwrite the buffer to avoid overwriting the response
           keep_buffers = true;
         }
@@ -876,8 +936,7 @@ static int omc_srv_read(omcache_t *mc, omc_srv_t *srv,
 // try to write/connect if there's pending data to this server.  read any
 // responses returned by the server calling mc->resp_cb on them.  if a
 // response's 'opaque' matches req_id store that response in *resp.
-static int omc_srv_io(omcache_t *mc, omc_srv_t *srv,
-                      uint32_t req_id, omcache_resp_t *resp)
+static int omc_srv_io(omcache_t *mc, omc_srv_t *srv, omc_resp_lookup_t *rlookup)
 {
   bool again_w = false, again_r = false;
   ssize_t buf_len = srv->send_buffer.w - srv->send_buffer.r;
@@ -916,7 +975,7 @@ static int omc_srv_io(omcache_t *mc, omc_srv_t *srv,
     }
   if (srv->conn_timeout == 0 && srv->sock >= 0 && srv->last_req_recvd < srv->last_nq_req_sent)
     {
-      ret = omc_srv_read(mc, srv, req_id, resp);
+      ret = omc_srv_read(mc, srv, rlookup);
       if (ret == OMCACHE_AGAIN)
         again_r = true;
       else if (ret != OMCACHE_OK)
@@ -925,32 +984,69 @@ static int omc_srv_io(omcache_t *mc, omc_srv_t *srv,
   return (again_w || again_r) ? OMCACHE_AGAIN : OMCACHE_OK;
 }
 
-// process writes and reads until we see a response to req_id or until timeout_msec has passed
-// if req_id is given the relevant response will be stored in *resp
-int omcache_io(omcache_t *mc, int32_t timeout_msec, uint32_t req_id, omcache_resp_t *resp)
+// Process writes and reads until we see a response to req_id or until
+// timeout_msec has passed.
+// If reqs are given the relevant responses will be stored in values.
+int omcache_io(omcache_t *mc,
+               omcache_req_t *reqs, size_t *req_count,
+               omcache_value_t *values, size_t *value_count,
+               int32_t timeout_msec)
 {
   int again, ret = OMCACHE_OK;
+  bool nothing_to_poll = false;
   int64_t now = omc_msec();
   int64_t timeout_abs = (timeout_msec > 0) ? now + timeout_msec : - 1;
+  omc_resp_lookup_t rlookup_st, *rlookup = NULL;
 
-  if (resp)
+  if (reqs && req_count && *req_count && values && value_count && *value_count)
     {
-      resp->header = NULL;
-      resp->key = NULL;
-      resp->data = NULL;
+      rlookup = &rlookup_st;
+      rlookup->values_returned = 0;
+      rlookup->requests_found = 0;
+      rlookup->values = values;
+      rlookup->values_size = *value_count;
+      rlookup->req_id_count = *req_count;
+      rlookup->req_id_min = 0xffffffff;
+      rlookup->req_id_max = 0;
+      for (size_t i = 0; i < *req_count; i ++)
+        {
+          uint32_t req_id = reqs[i].header.opaque;
+          if (req_id < rlookup->req_id_min)
+            rlookup->req_id_min = req_id;
+          if (req_id > rlookup->req_id_max)
+            rlookup->req_id_max = req_id;
+        }
+      if (*req_count == 1)
+        {
+          rlookup->requests = &reqs;
+        }
+      else
+        {
+          rlookup->requests = calloc(rlookup->req_id_max - rlookup->req_id_min + 1, sizeof(*rlookup->requests));
+          for (size_t i = 0; i < *req_count; i++)
+            {
+              uint32_t req_id = reqs[i].header.opaque;
+              rlookup->requests[req_id - rlookup->req_id_min] = &reqs[i];
+            }
+        }
+      *value_count = 0;
     }
 
   while (ret == OMCACHE_OK || ret == OMCACHE_AGAIN)
     {
-      omc_debug("looking for %u timeout in %lld msec",
-                req_id, (long long) (timeout_abs != -1 ? timeout_abs - omc_msec() : -1));
+      omc_debug("looking for %zu req_ids (%u..%u); timeout in %lld msec",
+                rlookup ? rlookup->req_id_count : 0,
+                rlookup ? rlookup->req_id_min : 0,
+                rlookup ? rlookup->req_id_max : 0,
+                (long long) (timeout_abs != -1 ? timeout_abs - omc_msec() : -1));
       if (timeout_abs >= 0)
         {
           now = omc_msec();
           if (now > timeout_abs)
             {
               omc_debug("%s", "omcache_io timeout");
-              return OMCACHE_AGAIN;
+              ret = OMCACHE_AGAIN;
+              break;
             }
           timeout_msec = timeout_abs - now;
         }
@@ -960,7 +1056,9 @@ int omcache_io(omcache_t *mc, int32_t timeout_msec, uint32_t req_id, omcache_res
       struct pollfd *pfds = omcache_poll_fds(mc, &nfds, &timeout_poll);
       if (nfds == 0)
         {
+          omc_debug("%s", "nothing to poll, breaking");
           ret = OMCACHE_OK;
+          nothing_to_poll = true;
           break;
         }
       timeout_poll = (timeout_msec > 0) ? min(timeout_msec, timeout_poll) : timeout_poll;
@@ -981,7 +1079,7 @@ int omcache_io(omcache_t *mc, int32_t timeout_msec, uint32_t req_id, omcache_res
                 }
               continue;
             }
-          ret = omc_srv_io(mc, srv, req_id, resp);
+          ret = omc_srv_io(mc, srv, rlookup);
           omc_srv_debug(srv, "io: %s", omcache_strerror(ret));
           if (ret == OMCACHE_AGAIN)
             again ++;
@@ -989,12 +1087,16 @@ int omcache_io(omcache_t *mc, int32_t timeout_msec, uint32_t req_id, omcache_res
             break;
         }
 
-      // break the or we found req_id: the receive buffer could be
+      omc_debug("status %d (%s), %zu responses found, timeout %d",
+                ret, omcache_strerror(ret), rlookup ? rlookup->values_returned : 0, timeout_msec);
+
+      // break the or we found any responses: the receive buffer could be
       // overwritten by new calls to omc_srv_io so we need to allow the
       // caller to process the response before resuming reads.
-      if (resp && resp->header)
+      if (rlookup && (rlookup->values_returned || rlookup->requests_found == *req_count))
         {
           // don't want to return OMCACHE_AGAIN if we found our key
+          omc_debug("found %zu responses, breaking loop", rlookup->values_returned);
           ret = OMCACHE_OK;
           again = 0;
           break;
@@ -1004,10 +1106,25 @@ int omcache_io(omcache_t *mc, int32_t timeout_msec, uint32_t req_id, omcache_res
       if (timeout_msec == 0)
         break;
     }
-  if (ret == OMCACHE_OK && resp && resp->header == NULL)
-    ret = OMCACHE_AGAIN;
   if (ret == OMCACHE_OK && again > 0)
     ret = OMCACHE_AGAIN;
+  if (rlookup)
+    {
+      // figure out which requests weren't finished yet, unless we've given
+      // up on polling which means that the requests we sent out are not
+      // going to be answered (for examples misses to GETQ)
+      size_t remaining_requests = 0;
+      if (!nothing_to_poll)
+        for (size_t i = 0; i < rlookup->req_id_count; i++)
+          if (reqs[i].header.magic)
+            memmove(&reqs[remaining_requests++], &reqs[i], sizeof(omcache_req_t));
+      *req_count = remaining_requests;
+      *value_count = rlookup->values_returned;
+      if (rlookup->req_id_count > 1)
+        free(rlookup->requests);
+      if (ret == OMCACHE_OK && *req_count)
+        ret = OMCACHE_AGAIN;
+    }
   return ret;
 }
 
@@ -1160,84 +1277,6 @@ static int omc_srv_send_noop(omcache_t *mc, omc_srv_t *srv, bool init)
   return omc_srv_submit(mc, srv, iov, 1);
 }
 
-int omcache_command(omcache_t *mc, omcache_req_t *req, omcache_resp_t *resp,
-                    int server_index, int32_t timeout_msec)
-{
-  int ret = OMCACHE_NO_SERVERS;
-  protocol_binary_request_header *hdr = (protocol_binary_request_header *) req->header;
-  size_t h_keylen = be16toh(hdr->request.keylen);
-  size_t h_datalen = be32toh(hdr->request.bodylen) - h_keylen - hdr->request.extlen;
-
-  omc_srv_t *srv = NULL;
-  if (server_index == -1)
-    {
-      if (mc->server_count == 1)
-        srv = mc->servers[0];
-      else if (mc->server_count > 1)
-        srv = omc_ketama_lookup(mc, req->key, h_keylen);
-    }
-  else if (server_index >= 0 && server_index < mc->server_count)
-    {
-      srv = mc->servers[server_index];
-    }
-
-  if (srv)
-    {
-      // try to flush out anything pending for the server
-      if (mc->buffer_writes == false)
-        {
-          ret = omc_srv_io(mc, srv, 0, NULL);
-          omc_srv_debug(srv, "io: %s", omcache_strerror(ret));
-        }
-
-      // set the common magic numbers for request
-      hdr->request.magic = PROTOCOL_BINARY_REQ;
-      hdr->request.datatype = PROTOCOL_BINARY_RAW_BYTES;
-      // set an incrementing request id to each request
-      hdr->request.opaque = ++ mc->req_id;
-
-      // construct the iovector
-      struct iovec iov[] = {
-        { .iov_base = req->header, .iov_len = sizeof(hdr->bytes) + hdr->request.extlen },
-        { .iov_base = (void *) req->key, .iov_len = h_keylen, },
-        { .iov_base = (void *) req->data, .iov_len = h_datalen, },
-        };
-      ret = omc_srv_submit(mc, srv, iov, 3);
-    }
-
-  if (timeout_msec == 0 || (ret != OMCACHE_OK && ret != OMCACHE_BUFFERED))
-    {
-      // no response requested or data wasn't sent. we're done.
-      if (resp)
-        {
-          memset(resp, 0, sizeof(*resp));
-          // return OMCACHE_AGAIN if we were able to send the request but
-          // didn't read a response because we got 0 timeout
-          if (ret == OMCACHE_OK)
-            ret = OMCACHE_AGAIN;
-        }
-      return ret;
-    }
-
-  // we need a response to figure out status even if the caller doesn't want
-  // a response object except when we're dealing with a stat command that
-  // is expected to receive multiple response packets.
-  omcache_resp_t osresp;
-  if (resp == NULL && hdr->request.opcode != PROTOCOL_BINARY_CMD_STAT)
-    resp = &osresp;
-
-  // look for the response to the query we just sent
-  ret = omcache_io(mc, timeout_msec, hdr->request.opaque, resp);
-  if (ret == OMCACHE_OK && resp && resp->header)
-    {
-      // map response code to the status returned by server
-      protocol_binary_response_header *rhdr =
-        (protocol_binary_response_header *) resp->header;
-      ret = omc_map_mc_status_to_ret_code(be16toh(rhdr->response.status));
-    }
-  return ret;
-}
-
 omcache_server_info_t *omcache_server_info(omcache_t *mc, int server_index)
 {
   if (server_index >= mc->server_count || server_index < 0)
@@ -1254,4 +1293,159 @@ int omcache_server_info_free(omcache_t *mc __attribute__((unused)), omcache_serv
   free(info->hostname);
   free(info);
   return OMCACHE_OK;
+}
+
+int omcache_command_status(omcache_t *mc, omcache_req_t *req, int32_t timeout_msec)
+{
+  size_t req_count = 1, value_count = 1;
+  omcache_value_t value = {0};
+
+  int ret = omcache_command(mc, req, &req_count, &value, &value_count, timeout_msec);
+  return (ret == OMCACHE_OK && value_count) ? value.status : ret;
+}
+
+int omcache_command(omcache_t *mc,
+                    omcache_req_t *reqs, size_t *req_countp,
+                    omcache_value_t *values, size_t *value_count,
+                    int32_t timeout_msec)
+{
+  int ret = OMCACHE_OK;
+  size_t req_count = *req_countp;
+  *req_countp = 0;
+
+  struct rpsbucket_s
+  {
+    omcache_req_t *reqs;
+    size_t count;
+    size_t size;
+  } reqs_per_server[mc->server_count];
+  memset(reqs_per_server, 0, sizeof(reqs_per_server));
+
+  if (mc->server_count == 0)
+    {
+      ret = OMCACHE_NO_SERVERS;
+    }
+  else if (mc->server_count == 1)
+    {
+      reqs_per_server[0].reqs = reqs;
+      reqs_per_server[0].count = req_count;
+    }
+  else
+    {
+      for (size_t i=0; i<req_count; i++)
+        {
+          omcache_req_t *req = &reqs[i];
+          size_t h_keylen = be16toh(req->header.keylen);
+          int server_index = (req->server_index != -1)
+              ? (req->server_index)
+              : (omc_ketama_lookup(mc, req->key, h_keylen)->list_index);
+          struct rpsbucket_s *rps = &reqs_per_server[server_index];
+          if (req_count == 1)
+            {
+              // minor optimization when calling this api with a single request
+              rps->reqs = reqs;
+              rps->count = 1;
+              break;
+            }
+          if (rps->size <= rps->count)
+            {
+              rps->size += 16;
+              rps->reqs = realloc(rps->reqs, rps->size * sizeof(omcache_req_t));
+            }
+          rps->reqs[rps->count ++] = *req;
+        }
+    }
+
+  for (int i = 0; i < mc->server_count; i ++)
+    {
+      struct rpsbucket_s *rps = &reqs_per_server[i];
+      if (rps->count == 0)
+        continue;
+      omc_srv_t *srv = mc->servers[i];
+
+      // try to flush out anything pending for the server
+      if (mc->buffer_writes == false)
+        {
+          ret = omc_srv_io(mc, srv, NULL);
+          omc_srv_debug(srv, "io: %s", omcache_strerror(ret));
+          if (ret != OMCACHE_AGAIN && ret != OMCACHE_OK)
+            {
+              omc_srv_log(LOG_WARNING, srv, "flush failed, not sending %zu requests", rps->count);
+              if (rps->size)
+                free(rps->reqs);
+              continue;
+            }
+        }
+
+      ret = OMCACHE_OK;
+
+      struct iovec iov[min(4 * rps->count, g_iov_max)];
+      int iov_idx = 0, iov_req_count = 0;
+      size_t srv_reqs_sent = 0;
+
+      for (size_t ri = 0; ri < rps->count; ri ++)
+        {
+          omcache_req_t *req = &rps->reqs[ri];
+          size_t h_keylen = be16toh(req->header.keylen);
+          size_t h_datalen = be32toh(req->header.bodylen) - h_keylen - req->header.extlen;
+          // set the common magic numbers for request
+          req->header.magic = PROTOCOL_BINARY_REQ;
+          req->header.datatype = PROTOCOL_BINARY_RAW_BYTES;
+          // set an incrementing request id to each request
+          req->header.opaque = ++ mc->req_id;
+
+          // construct the iovector
+          iov[iov_idx ++] = (struct iovec) { .iov_base = &req->header, .iov_len = sizeof(req->header) };
+          if (req->header.extlen)
+            iov[iov_idx ++] = (struct iovec) { .iov_base = (void *) req->extra, .iov_len = req->header.extlen };
+          if (h_keylen)
+            iov[iov_idx ++] = (struct iovec) { .iov_base = (void *) req->key, .iov_len = h_keylen };
+          if (h_datalen)
+            iov[iov_idx ++] = (struct iovec) { .iov_base = (void *) req->data, .iov_len = h_datalen };
+          iov_req_count ++;
+
+          // submit tasks if we're running out of iovec space
+          if (g_iov_max - iov_idx < 4)
+            {
+              ret = omc_srv_submit(mc, srv, iov, iov_idx);
+              if (ret != OMCACHE_OK && ret != OMCACHE_BUFFERED)
+                {
+                  omc_srv_log(LOG_WARNING, srv, "submitting %d requests failed, not sending %zu more",
+                              iov_req_count, rps->count - ri - 1);
+                  break;
+                }
+              srv_reqs_sent = ri;
+              iov_idx = 0;
+              iov_req_count = 0;
+            }
+        }
+      if (ret == OMCACHE_OK || ret == OMCACHE_BUFFERED)
+        {
+          ret = omc_srv_submit(mc, srv, iov, iov_idx);
+          if (ret == OMCACHE_OK || ret == OMCACHE_BUFFERED)
+            srv_reqs_sent = rps->count;
+          else
+            omc_srv_log(LOG_WARNING, srv, "submitting %d requests failed", iov_req_count);
+        }
+      // copy sent requests back to the original 'reqs' array so we can look them up later
+      if (srv_reqs_sent)
+        {
+          // NOTE: in case of 1 server or 1 request reqs and rps->reqs may point to the same place
+          memmove(reqs + *req_countp, rps->reqs, srv_reqs_sent * sizeof(*reqs));
+          *req_countp += srv_reqs_sent;
+        }
+      if (rps->size)
+        free(rps->reqs);
+    }
+
+  if (timeout_msec == 0 || *req_countp == 0)
+    {
+      // no response requested or data wasn't sent. we're done.
+      if (value_count)
+        *value_count = 0;
+      return ret;
+    }
+
+  // look for responses to the queries we just sent
+  return omcache_io(mc, reqs, req_countp, values, value_count, timeout_msec);
 }

@@ -86,14 +86,11 @@ class Client(omcache.OMcache):
         return self.get(key, cas=True)
 
     def get_multi(self, keys, key_prefix=None):
-        # omcache doesn't provide get_multi like operation without using
-        # response callbacks at the moment.
-        # XXX: do something different, don't block for each key
-        result = {}
-        for key in keys:
-            value = self.get("{0}{1}".format(key_prefix or "", key))
-            if value is not None:
-                result[key] = value
+        if key_prefix:
+            keys = ["{0}{1}".format(key_prefix, key) for key in keys]
+        result = super(Client, self).get_multi(keys)
+        if key_prefix:
+            return dict((k[len(key_prefix):], v) for k, v in result.items())
         return result
 
     def set(self, key, value, time=0):

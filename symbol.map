@@ -19,9 +19,10 @@ OMCACHE_0.1
     omcache_set_log_callback;
     omcache_log_stderr;
 
-    omcache_poll_fds;
-    omcache_io;
     omcache_command;
+    omcache_command_status;
+    omcache_io;
+    omcache_poll_fds;
 
     omcache_server_index_for_key;
     omcache_server_info;
@@ -37,6 +38,7 @@ OMCACHE_0.1
     omcache_decrement;
     omcache_delete;
     omcache_get;
+    omcache_get_multi;
 
   local: *;
 };

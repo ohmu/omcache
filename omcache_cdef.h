@@ -28,16 +28,40 @@ typedef enum omcache_ret_e {
 typedef struct omcache_s omcache_t;
 
 typedef struct omcache_req_s {
-    void *header;
-    const unsigned char *key;
-    const unsigned char *data;
+    int server_index;           ///< Opaque integer identifying the server to
+                                ///  use when the request type does not use
+                                ///  a key (NOOP, VERSION and STATS).
+                                ///  -1 when server is selected by key.
+    struct protocol_binary_request_header_s {
+        uint8_t magic;          ///< Always PROTOCOL_BINARY_REQ (0x80),
+                                ///  set by OMcache
+        uint8_t opcode;         ///< Command type
+        uint16_t keylen;        ///< Length of key, in network byte order
+        uint8_t extlen;         ///< Length of structured extra data
+        uint8_t datatype;       ///< Always PROTOCOL_BINARY_RAW_BYTES (0x00),
+                                ///  set by OMcache
+        uint16_t reserved;      ///< Reserved, do not set
+        uint32_t bodylen;       ///< Request body length, in network byte
+                                ///  order, includes extra, key and data
+        uint32_t opaque;        ///< Request identifier, set by OMcache
+        uint64_t cas;           ///< CAS value for synchronization
+    } header;                   ///< Memcache binary protocol header struct
+    void *extra;                ///< Extra structured data sent for some
+                                ///  request types
+    const unsigned char *key;   ///< Object key
+    const unsigned char *data;  ///< Object value
 } omcache_req_t;
 
-typedef struct omcache_resp_s {
-    void *header;
-    const unsigned char *key;
-    const unsigned char *data;
-} omcache_resp_t;
+typedef struct omcache_value_s {
+    int status;                 ///< Response status (omcache_ret_t)
+    const unsigned char *key;   ///< Response key (if any)
+    size_t key_len;             ///< Response key length
+    const unsigned char *data;  ///< Response data (if any)
+    size_t data_len;            ///< Response data length
+    uint32_t flags;             ///< Flags associated with the object
+    uint64_t cas;               ///< CAS value for synchronization
+    uint64_t delta_value;       ///< Value returned in delta operations
+} omcache_value_t;
 
 // OMcache -object
 
@@ -162,11 +186,10 @@ int omcache_set_log_callback(omcache_t *mc, omcache_log_callback_func *func, voi
 /**
  * Response callback type.
  * @param mc OMcache handle.
- * @param res Response status (see omcache_ret_t).
- * @param resp Response object.
+ * @param result Response value object.
  * @param context Opaque context set in omcache_set_response_callback().
  */
-typedef void (omcache_response_callback_func)(omcache_t *mc, int res, omcache_resp_t *resp, void *context);
+typedef void (omcache_response_callback_func)(omcache_t *mc, omcache_value_t *result, void *context);
 
 /**
  * Register a callback function for memcached responses.
@@ -200,31 +223,62 @@ int omcache_reset_buffers(omcache_t *mc);
  * Perform I/O with memcached servers: establish connections, read
  * responses, write requests.
  * @param mc OMcache handle.
+ * @param reqs Array of requests for which we want responses.  Once
+ *             responses have been found for any requests this function
+ *             returns instead of polling on the sockets to allow callers to
+ *             process the data.  The array will be modified by the call to
+ *             contain requests that are still pending after this call.
+ * @param req_count Number of requests in reqs array.  Will be modified to
+ *                  contain the number of pending requests after this call.
+ * @param values Pointer to an array of omcache_value_t structures to store
+ *               the responses found.  If there aren't enough value structs
+ *               to store all requests found the responses will be silently
+ *               dropped.  The memory pointed to by pointers in the
+ *               omcache_value_t structs will be overwritten on subsequent
+ *               calls to omcache_io and must not be freed by the caller.
+ *               Note that all request types may not generate a response,
+ *               namely a GETQ or GETKQ request for a non-existent key will
+ *               not cause any response to be sent by the server or stored
+ *               by OMcache even if omcache_io return status is OMCACHE_OK.
+ * @param value_count Number of response structures in values array.  Will
+ *                    be modified to contain the number of stored responses.
  * @param timeout_msec Maximum number of milliseconds to block while waiting
  *                     for I/O to complete.  Zero means no blocking at all
  *                     and a negative value blocks indefinitely until at
  *                     least one message has been received.
- * @param req_id Request id to look for in responses, once a response to this
- *               request has been received the function returns.
- * @param resp Pointer to a omcache_resp_t structure to store the response
- *             pointed by req_id into.  The memory will be overwritten on
- *             subsequent calls to omcache_io and must not be modified or
- *             freed by caller.
  * @return OMCACHE_OK If all responses were received;
  *         OMCACHE_AGAIN If there is more data to read.
 */
-int omcache_io(omcache_t *mc, int32_t timeout_msec, uint32_t req_id, omcache_resp_t *resp);
+int omcache_io(omcache_t *mc,
+               omcache_req_t *reqs, size_t *req_count,
+               omcache_value_t *values, size_t *value_count,
+               int32_t timeout_msec);
 
 /**
- * Send a request to memcache and optionally read a response.
+ * Send a request to memcache and read the response status.
  * @param mc OMcache handle.
  * @param req An omcache_req_t struct containing at the request header
  *            and optionally a key and data.
- * @param resp An optional response structure to be filled with the response
- *             to the sent request.
- * @param server_index Opaque integer identifying the server to use when
- *                     the request type does not use a key (for example NOOP,
- *                     VERSION and STATS). -1 when server is selected by key.
+ * @param timeout_msec Maximum number of milliseconds to block while waiting
+ *                     for the response.  Zero means no blocking at all and
+ *                     a negative value blocks indefinitely until at a
+ *                     response is received or an error occurs.
+ * @return OMCACHE_OK if data was successfully written;
+ *         OMCACHE_BUFFERED if data was successfully added to write buffer;
+ *         OMCACHE_BUFFER_FULL if buffer was full and data was not written;
+ *         OMCACHE_NOT_FOUND
+ *         OMCACHE_KEY_EXISTS
+ *         OMCACHE_DELTA_BAD_VALUE
+ */
+int omcache_command_status(omcache_t *mc, omcache_req_t *req, int32_t timeout_msec);
+
+/**
+ * Send multiple requests to memcache and start reading their responses.
+ * @param mc OMcache handle.
+ * @param reqs Array of requests to send, handled like in omcache_io().
+ * @param req_count reqs length, handled like in omcache_io().
+ * @param values Array to store responses in, handled like in omcache_io().
+ * @param value_count values length, handled like in omcache_io().
  * @param timeout_msec Maximum number of milliseconds to block while waiting
  *                     for the response.  Zero means no blocking at all and
  *                     a negative value blocks indefinitely until at a
@@ -233,8 +287,10 @@ int omcache_io(omcache_t *mc, int32_t timeout_msec, uint32_t req_id, omcache_res
  *         OMCACHE_BUFFERED if data was successfully added to write buffer;
  *         OMCACHE_BUFFER_FULL if buffer was full and data was not written.
  */
-int omcache_command(omcache_t *mc, omcache_req_t *req, omcache_resp_t *resp,
-                    int server_index, int32_t timeout_msec);
+int omcache_command(omcache_t *mc,
+                    omcache_req_t *reqs, size_t *req_countp,
+                    omcache_value_t *values, size_t *value_count,
+                    int32_t timeout_msec);
 
 // Server info
 
@@ -303,6 +359,9 @@ int omcache_noop(omcache_t *mc,
  * @param command Statistics type to look up or NULL for general statistics.
  *                Possible commands are backend specific, see memcached's
  *                documentation for the values it supports.
+ * @param values Array of omcache_value_t structures to be will be filled
+ *               with the results of the stats lookup.
+ * @param value_count Number of omcache_value_t structures in values.
  * @param server_index Numeric index of the server from OMcache's internal
  *                     server list to look up.  Use
  *                     omcache_server_index_for_key() to get the indexes.
@@ -314,6 +373,7 @@ int omcache_noop(omcache_t *mc,
  *         OMCACHE_NO_SERVERS if server_index is out of bounds.
  */
 int omcache_stat(omcache_t *mc, const char *command,
+                 omcache_value_t *values, size_t *value_count,
                  int server_index, int32_t timeout_msec);
 
 /**
@@ -469,7 +529,7 @@ int omcache_delete(omcache_t *mc,
                    int32_t timeout_msec);
 
 /**
- * Look up a key from the backend.
+ * Look up a key from a backend.
  * @param mc OMcache handle.
  * @param key Key to look up.
  * @param key_len Length of the key.
@@ -490,3 +550,35 @@ int omcache_get(omcache_t *mc,
                 const unsigned char **value, size_t *value_len,
                 uint32_t *flags, uint64_t *cas,
                 int32_t timeout_msec);
+
+/**
+ * Look up multiple keys from the backends.
+ * @param mc OMcache handle.
+ * @param keys Array of pointers to keys to look up.
+ * @param key_lens Array of lengths of keys.
+ * @param key_count Number of pointers in keys array.
+ * @param reqs Array of request structures to store pending requests in.
+ *             If this function can't complete all lookups in a single round
+ *             of I/O operations the pending requests are stored in this
+ *             array which can be passed to omcache_io() to complete the
+ *             remaining requests.
+ * @param req_count Number of requests in reqs array.  Will be modified to
+ *                  contain the number of pending requests after this call.
+ * @param values Array to store responses in, handled like in omcache_io().
+ * @param value_count values length, handled like in omcache_io().
+ * @param timeout_msec Maximum number of milliseconds to block while waiting
+ *                     for I/O to complete.  Zero means no blocking at all
+ *                     and a negative value blocks indefinitely.
+ * @return OMCACHE_OK All requests were handled;
+ *         OMCACHE_AGAIN Not all values were retrieved,
+ *                       call omcache_io() to retrieve them.
+ */
+int omcache_get_multi(omcache_t *mc,
+                      const unsigned char **keys,
+                      size_t *key_lens,
+                      size_t key_count,
+                      omcache_req_t *reqs,
+                      size_t *req_count,
+                      omcache_value_t *values,
+                      size_t *value_count,
+                      int32_t timeout_msec);

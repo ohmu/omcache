@@ -19,6 +19,7 @@ _ffi.cdef(open(os.path.join(os.path.dirname(__file__), "omcache_cdef.h")).read()
 _oc = _ffi.dlopen("libomcache.so.0")
 
 _sizep = _ffi.new("size_t *")
+_sizep2 = _ffi.new("size_t *")
 _u32p = _ffi.new("uint32_t *")
 _u64p = _ffi.new("uint64_t *")
 _cucpp = _ffi.new("const unsigned char **")
@@ -106,11 +107,11 @@ class OMcache(object):
         _oc.omcache_set_log_callback(self.omc, log_cb, _ffi.NULL)
 
     @staticmethod
-    def _omc_check(name, ret, return_buffer=False):
+    def _omc_check(name, ret, return_buffer=False, allowed=[_oc.OMCACHE_BUFFERED]):
         if return_buffer:
             if ret == _oc.OMCACHE_OK:
                 return _ffi.buffer(_cucpp[0], _sizep[0])[:]
-        elif ret == _oc.OMCACHE_OK or ret == _oc.OMCACHE_BUFFERED:
+        elif ret == _oc.OMCACHE_OK or ret in allowed:
             return ret
         if ret == _oc.OMCACHE_NOT_FOUND:
             raise NotFoundError
@@ -180,18 +181,30 @@ class OMcache(object):
 
     @_omc_return("omcache_io")
     def flush(self, timeout=-1):
-        return _oc.omcache_io(self.omc, timeout, 0, _ffi.NULL)
+        return _oc.omcache_io(self.omc, _ffi.NULL, _ffi.NULL, _ffi.NULL, _ffi.NULL, timeout)
 
     @_omc_return("omcache_noop")
     def noop(self, server_index=0, timeout=None):
         timeout = timeout if timeout is not None else self.io_timeout
         return _oc.omcache_noop(self.omc, server_index, timeout)
 
-    @_omc_return("omcache_stat")
     def stat(self, command="", server_index=0, timeout=None):
         command = _to_bytes(command)
         timeout = timeout if timeout is not None else self.io_timeout
-        return _oc.omcache_stat(self.omc, command, server_index, timeout)
+        stat_count = 50  # 50 keys enough?
+        values = _ffi.new("omcache_value_t[]", stat_count)
+        _sizep[0] = stat_count
+        ret = _oc.omcache_stat(self.omc, command, values, _sizep, server_index, timeout)
+        self._omc_check("omcache_stat", ret)
+        results = {}
+        for i in range(_sizep[0]):
+            self._omc_check("omcache_stat", values[i].status)
+            key = _ffi.buffer(values[i].key, values[i].key_len)[:]
+            value = _ffi.buffer(values[i].data, values[i].data_len)[:]
+            if not key and not value:
+                break
+            results[key] = value
+        return results
 
     @_omc_return("omcache_set")
     def set(self, key, value, expiration=0, flags=0, cas=0, timeout=None):
@@ -235,6 +248,40 @@ class OMcache(object):
             return (buf, _u32p[0])
         elif cas:
             return (buf, _u64p[0])
+
+    def get_multi(self, keys, flags=False, cas=False, timeout=None):
+        keys = [_to_bytes(key) for key in keys]
+        ckeys = [_ffi.new("unsigned char[]", key) for key in keys]
+        key_lens = [len(key) for key in keys]
+        values = _ffi.new("omcache_value_t[]", len(keys))
+        _sizep[0] = len(keys)
+        requests = _ffi.new("omcache_req_t[]", len(keys))
+        _sizep2[0] = len(keys)
+        timeout = timeout if timeout is not None else self.io_timeout
+        results = {}
+        def process_responses():
+            for i in range(_sizep[0]):
+                if values[i].status != _oc.OMCACHE_OK:
+                    continue
+                key = _ffi.buffer(values[i].key, values[i].key_len)[:]
+                value = _ffi.buffer(values[i].data, values[i].data_len)[:]
+                if flags and cas:
+                    value = (value, values[i].flags, values[i].cas)
+                elif flags:
+                    value = (value, values[i].flags)
+                elif cas:
+                    value = (value, values[i].cas)
+                results[key] = value
+        ret = _oc.omcache_get_multi(self.omc, ckeys, key_lens, len(keys),
+                                    requests, _sizep2, values, _sizep, timeout)
+        self._omc_check("omcache_get_multi", ret, allowed=[_oc.OMCACHE_OK, _oc.OMCACHE_AGAIN])
+        process_responses()
+        while _sizep2[0]:
+            _sizep[0] = len(keys)
+            ret = _oc.omcache_io(self.omc, requests, _sizep2, values, _sizep, timeout)
+            self._omc_check("omcache_io", ret, allowed=[_oc.OMCACHE_OK, _oc.OMCACHE_AGAIN])
+            process_responses()
+        return results
 
     def increment(self, key, delta=1, initial=0, expiration=0, timeout=None):
         key = _to_bytes(key)

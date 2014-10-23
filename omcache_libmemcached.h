@@ -43,7 +43,7 @@ typedef const char *memcached_server_distribution_t;
 #define memcached_create(mc) omcache_init()
 #define memcached_free(mc) omcache_free(mc)
 #define memcached_strerror(mc,rc) omcache_strerror(rc)
-#define memcached_flush_buffers(mc) omcache_io((mc), -1, 0, NULL)
+#define memcached_flush_buffers(mc) omcache_io((mc), NULL, NULL, NULL, NULL, -1)
 #define memcached_flush(mc,expire) ({ \
     int srvidx_, rc_ = OMCACHE_OK; \
     for (srvidx_ = 0; rc_ == OMCACHE_OK; srvidx_ ++) \
