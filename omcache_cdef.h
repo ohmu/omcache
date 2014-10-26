@@ -13,16 +13,18 @@
 // Note: some of these numbers try to match the identifiers used by the
 // memcached binary protocol
 typedef enum omcache_ret_e {
-  OMCACHE_OK = 0x0000, ///< success
-  OMCACHE_NOT_FOUND = 0x0001, ///< key not found from memcached
-  OMCACHE_KEY_EXISTS = 0x0002, ///< conflicting key exists in memcached
-  OMCACHE_DELTA_BAD_VALUE = 0x0006, ///< value can not be incremented or decremented
-  OMCACHE_FAIL = 0x0999, ///< memcached signaled command failure
-  OMCACHE_AGAIN = 0x1001, ///< operation would block, call again
-  OMCACHE_BUFFERED, ///< data buffered internally, request not delivered yet
-  OMCACHE_BUFFER_FULL, ///< internal buffers full, can not process request
-  OMCACHE_NO_SERVERS, ///< no server available for communication
-  OMCACHE_SERVER_FAILURE, ///< failure communicating to selected server
+  OMCACHE_OK = 0x00,               ///< Success
+  OMCACHE_NOT_FOUND = 0x01,        ///< Key not found from memcached
+  OMCACHE_KEY_EXISTS = 0x02,       ///< Conflicting key exists in memcached
+  OMCACHE_DELTA_BAD_VALUE = 0x06,  ///< Existing value can not be
+                                   ///  incremented or decremented
+  OMCACHE_FAIL = 0x0FFF,           ///< Command failed in memcached
+  OMCACHE_AGAIN = 0x1001,          ///< Call would block, try again
+  OMCACHE_INVALID,                 ///< Invalid parameters
+  OMCACHE_BUFFERED,                ///< Data buffered in OMcache
+  OMCACHE_BUFFER_FULL,             ///< Buffer full, command dropped
+  OMCACHE_NO_SERVERS,              ///< No server available
+  OMCACHE_SERVER_FAILURE,          ///< Failure communicating to server
 } omcache_ret_t;
 
 typedef struct omcache_s omcache_t;
@@ -564,6 +566,7 @@ int omcache_get(omcache_t *mc,
  *             remaining requests.
  * @param req_count Number of requests in reqs array.  Will be modified to
  *                  contain the number of pending requests after this call.
+ *                  req_count must be equal to or greater than key_count.
  * @param values Array to store responses in, handled like in omcache_io().
  * @param value_count values length, handled like in omcache_io().
  * @param timeout_msec Maximum number of milliseconds to block while waiting

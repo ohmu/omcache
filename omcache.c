@@ -203,6 +203,7 @@ const char *omcache_strerror(int rc)
     case OMCACHE_DELTA_BAD_VALUE: return "Existing value can not be incremented or decremented";
     case OMCACHE_FAIL: return "Command failed in memcached";
     case OMCACHE_AGAIN: return "Call would block, try again";
+    case OMCACHE_INVALID: return "Invalid parameters";
     case OMCACHE_BUFFERED: return "Data buffered in OMcache";
     case OMCACHE_BUFFER_FULL: return "Buffer full, command dropped";
     case OMCACHE_NO_SERVERS: return "No server available";

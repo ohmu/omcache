@@ -212,8 +212,12 @@ int omcache_get_multi(omcache_t *mc,
                       size_t *value_count,
                       int32_t timeout_msec)
 {
-  memset(requests, 0, sizeof(*requests) * key_count);
-  memset(values, 0, sizeof(*values) * key_count);
+  if (req_count == NULL || *req_count < key_count)
+    return OMCACHE_INVALID;
+
+  memset(requests, 0, sizeof(*requests) * *req_count);
+  if (values && value_count)
+    memset(values, 0, sizeof(*values) * *value_count);
 
   for (size_t i = 0; i < key_count; i ++)
     {
