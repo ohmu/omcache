@@ -1,7 +1,14 @@
 # omcache_pylibmc.py - a kludgy pylbmc API compatibility layer
 #
-# Written by Oskari Saarenmaa <os@ohmu.fi>, and is placed in the public
-# domain.  The author hereby disclaims copyright to this source code.
+# Copyright (c) 2013-2014, Oskari Saarenmaa <os@ohmu.fi>
+# All rights reserved.
+#
+# This file is under the Apache License, Version 2.0.
+# See the file `LICENSE` for details.
+#
+# NOTE: The functionality provided by this wrapper is limited and it is not
+# supported; it's provided to make it easier to prototype OMcache in simple
+# programs that use the pylibmc API.
 
 from sys import version_info
 import omcache
