@@ -66,18 +66,23 @@ class Client(omcache.OMcache):
     incr = omcache.OMcache.increment
     decr = omcache.OMcache.decrement
 
+    @staticmethod
+    def _deserialize_value(value, flags):
+        if flags & (PYLIBMC_FLAG_PICKLE | PYLIBMC_FLAG_ZLIB):
+            warnings.warn("Ignoring cache value for {0!r} with unsupported flags 0x{1:x}".format(key, flags))
+            return None
+        if flags & (PYLIBMC_FLAG_INT | PYLIBMC_FLAG_LONG):
+            return int(value)
+        if flags & PYLIBMC_FLAG_BOOL:
+            return bool(value)
+        return value
+
     def get(self, key, cas=False):
         try:
             value, flags, casval = super(Client, self).get(key, cas=True, flags=True)
         except NotFound:
             return None
-        if flags & (PYLIBMC_FLAG_PICKLE | PYLIBMC_FLAG_ZLIB):
-            warnings.warn("Ignoring cache value for {0!r} with unsupported flags 0x{1:x}".format(key, flags))
-            return None
-        if flags & (PYLIBMC_FLAG_INT | PYLIBMC_FLAG_LONG):
-            value = int(value)
-        elif flags & PYLIBMC_FLAG_BOOL:
-            value = bool(value)
+        value = self._deserialize_value(value, flags)
         if cas:
             return (value, casval)
         return value
@@ -88,9 +93,12 @@ class Client(omcache.OMcache):
     def get_multi(self, keys, key_prefix=None):
         if key_prefix:
             keys = ["{0}{1}".format(key_prefix, key) for key in keys]
-        result = super(Client, self).get_multi(keys)
-        if key_prefix:
-            return dict((k[len(key_prefix):], v) for k, v in result.items())
+        values = super(Client, self).get_multi(keys, flags=True)
+        result = {}
+        for key, (value, flags) in values.items():
+            if key_prefix:
+                key = key[len(key_prefix):]
+            result[key] = self._deserialize_value(value, flags)
         return result
 
     def set(self, key, value, time=0):
