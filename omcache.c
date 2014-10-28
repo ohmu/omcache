@@ -1284,6 +1284,8 @@ omcache_server_info_t *omcache_server_info(omcache_t *mc, int server_index)
     return NULL;
   omc_srv_t *srv = mc->servers[server_index];
   omcache_server_info_t *info = calloc(1, sizeof(*info));
+  info->omcache_version = OMCACHE_VERSION;
+  info->server_index = server_index;
   info->hostname = strdup(srv->hostname);
   info->port = atoi(srv->port);
   return info;

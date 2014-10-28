@@ -309,8 +309,12 @@ int omcache_server_index_for_key(omcache_t *mc, const unsigned char *key, size_t
 
 typedef struct omcache_server_info_s
 {
-  char *hostname;
-  int port;
+  // Since OMcache 0.1.0: make sure to verify omcache_version in returned
+  // struct matches the header version being used in the application
+  int omcache_version;  ///< OMcache client version
+  int server_index;     ///< Server index
+  char *hostname;       ///< Hostname of the server
+  int port;             ///< Port number of the server
 } omcache_server_info_t;
 
 /**

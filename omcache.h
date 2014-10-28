@@ -20,6 +20,7 @@
 #include "omcache_cdef.h"
 
 // CFFI can't handle defines yet
+#define OMCACHE_VERSION 0x00000100  // Version 0.1.0
 #define OMCACHE_DELTA_NO_ADD 0xffffffffu
 
 #endif // !_OMCACHE_H

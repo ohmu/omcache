@@ -35,7 +35,7 @@ int omcache_stat(omcache_t *mc, const char *command,
                  omcache_value_t *values, size_t *value_count,
                  int server_index, int32_t timeout_msec)
 {
-  size_t key_len = strlen(command);
+  size_t key_len = command ? strlen(command) : 0;
   size_t req_count = 1;
   omcache_req_t req = {
     .server_index = server_index,
