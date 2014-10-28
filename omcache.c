@@ -144,6 +144,7 @@ typedef struct omc_resp_lookup_s
 
 static int omc_srv_free(omcache_t *mc, omc_srv_t *srv);
 static int omc_srv_connect(omcache_t *mc, omc_srv_t *srv);
+static void omc_srv_reset(omcache_t *mc, omc_srv_t *srv, const char *log_msg);
 static int omc_srv_send_noop(omcache_t *mc, omc_srv_t *srv, bool init);
 static omc_ketama_t *omc_ketama_create(omcache_t *mc);
 static inline int64_t omc_msec();
@@ -276,6 +277,8 @@ static int omc_srv_free(omcache_t *mc, omc_srv_t *srv)
       mc->fd_map[srv->sock] = -1;
       srv->sock = -1;
     }
+  if (srv->addrs)
+    freeaddrinfo(srv->addrs);
   free(srv->send_buffer.base);
   free(srv->recv_buffer.base);
   memset(srv, 'S', sizeof(*srv));
@@ -447,8 +450,19 @@ struct pollfd *omcache_poll_fds(omcache_t *mc, int *nfds, int *poll_timeout)
         {
           if (srv->sock < 0)
             omc_srv_connect(mc, srv);
-          if (srv->conn_timeout > 0)
-            *poll_timeout = min(*poll_timeout, max(1, now - srv->conn_timeout));
+          // make sure poll timeout is at connection timeout, and in
+          // case it has already expired, set connection timeout to a
+          // special value (1) so next time we get here we know we
+          // weren't able to establish a connection in time.
+          if (srv->conn_timeout == 1)
+            omc_srv_reset(mc, srv, "timeout waiting for connect");
+          else if (srv->conn_timeout > 0 && now < srv->conn_timeout)
+            *poll_timeout = min(*poll_timeout, srv->conn_timeout - now);
+          else if (srv->conn_timeout > 0)
+            {
+              srv->conn_timeout = 1;
+              *poll_timeout = 1;
+            }
           if (srv->sock < 0)
             continue;
           mc->server_polls[n].fd = srv->sock;
@@ -524,7 +538,7 @@ static omc_ketama_t *omc_ketama_create(omcache_t *mc)
   return ktm;
 }
 
-static omc_srv_t *omc_ketama_lookup(omcache_t *mc, const unsigned char *key, size_t key_len)
+static int omc_ketama_lookup(omcache_t *mc, const unsigned char *key, size_t key_len)
 {
   uint32_t hash_value = omc_hash_jenkins_oat(key, key_len);
   const omc_ketama_point_t *first = mc->ketama->points, *last = mc->ketama->points + mc->ketama->point_count;
@@ -541,31 +555,47 @@ static omc_srv_t *omc_ketama_lookup(omcache_t *mc, const unsigned char *key, siz
     }
 
   // skip disabled servers
+  size_t skipped = 0;
   for (selected = (right == last) ? first : right;
       selected == last || selected->srv->disabled;
       selected++)
     {
       if (selected != last)
         {
-          omc_srv_log(LOG_NOTICE, selected->srv, "%s", "ketama skipping disabled server");
+          skipped ++;
           continue;
         }
       if (wrap)
         {
           omc_log(LOG_ERR, "%s", "all servers are disabled");
-          return NULL;
+          return -1;
         }
       wrap = true;
       selected = first;
     }
-  return selected->srv;
+  if (skipped)
+    omc_log(LOG_NOTICE, "ketama skipped %zu disabled server points", skipped);
+  return selected->srv->list_index;
 }
 
 int omcache_server_index_for_key(omcache_t *mc, const unsigned char *key, size_t key_len)
 {
   if (mc->server_count > 1)
-    return omc_ketama_lookup(mc, key, key_len)->list_index;
+    return omc_ketama_lookup(mc, key, key_len);
   return 0;
+}
+
+static void omc_srv_disable(omcache_t *mc, omc_srv_t *srv)
+{
+  // disable server until reconnect timeout
+  omc_srv_log(LOG_INFO, srv, "disabling server for %u msec", mc->reconnect_timeout_msec);
+  srv->retry_at = omc_msec() + mc->reconnect_timeout_msec;
+  srv->disabled = true;
+  // clear addrinfo cache to force fresh addrs to be used on retry
+  if (srv->addrs)
+    freeaddrinfo(srv->addrs);
+  srv->addrs = NULL;
+  srv->addrp = NULL;
 }
 
 static void
@@ -589,8 +619,7 @@ omc_srv_reset(omcache_t *mc, omc_srv_t *srv, const char *log_msg)
   srv->send_buffer.w = srv->send_buffer.base;
   if (srv->expected_noop)
     {
-      srv->retry_at = omc_msec() + mc->reconnect_timeout_msec;
-      srv->disabled = true;
+      omc_srv_disable(mc, srv);
     }
 }
 
@@ -611,8 +640,8 @@ static int omc_srv_connect(omcache_t *mc, omc_srv_t *srv)
       int err;
 
       // refresh the hosts addresses if we don't have them yet or if we last
-      // refreshed them > 10 seconds ago
-      if (srv->addrs == NULL || now - srv->last_gai > 10000)
+      // refreshed them before we were last connected
+      if (srv->addrs == NULL || srv->last_io_success > srv->last_gai)
         {
           if (srv->addrs)
             {
@@ -633,6 +662,7 @@ static int omc_srv_connect(omcache_t *mc, omc_srv_t *srv)
               omc_srv_log(LOG_WARNING, srv, "getaddrinfo: %s", gai_strerror(err));
               omc_srv_reset(mc, srv, "getaddrinfo failed");
               srv->addrs = NULL;
+              omc_srv_disable(mc, srv);
               return OMCACHE_SERVER_FAILURE;
             }
           srv->addrp = srv->addrs;
@@ -670,11 +700,13 @@ static int omc_srv_connect(omcache_t *mc, omc_srv_t *srv)
               omc_srv_reset(mc, srv, "connect failed");
             }
         }
-      freeaddrinfo(srv->addrs);
-      srv->addrs = NULL;
       if (srv->sock == -1)
         {
           omc_srv_reset(mc, srv, "no connection established");
+          // disable server if we've walked through the server list and
+          // weren't able to conncet to any address
+          if (srv->addrp == NULL)
+            omc_srv_disable(mc, srv);
           return OMCACHE_SERVER_FAILURE;
         }
     }
@@ -1039,6 +1071,14 @@ int omcache_io(omcache_t *mc,
         }
       *value_count = 0;
     }
+  else
+    {
+      if (req_count)
+        *req_count = 0;
+      if (value_count)
+        *value_count = 0;
+
+    }
 
   while (ret == OMCACHE_OK || ret == OMCACHE_AGAIN)
     {
@@ -1365,7 +1405,7 @@ int omcache_command(omcache_t *mc,
           size_t h_keylen = be16toh(req->header.keylen);
           int server_index = (req->server_index != -1)
               ? (req->server_index)
-              : (omc_ketama_lookup(mc, req->key, h_keylen)->list_index);
+              : omc_ketama_lookup(mc, req->key, h_keylen);
           struct rpsbucket_s *rps = &reqs_per_server[server_index];
           if (req_count == 1)
             {
