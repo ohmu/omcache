@@ -74,8 +74,7 @@ typedef struct omc_srv_s
   int64_t conn_timeout;
   uint32_t last_req_recvd;
   uint32_t last_req_sent;
-  uint32_t last_nq_req_sent;
-  bool last_req_quiet;
+  uint32_t last_req_sent_nq;
   omc_buf_t send_buffer;
   omc_buf_t recv_buffer;
   bool disabled;
@@ -430,11 +429,11 @@ struct pollfd *omcache_poll_fds(omcache_t *mc, int *nfds, int *poll_timeout)
     {
       omc_srv_t *srv = mc->servers[i];
       mc->server_polls[n].events = 0;
-      if (srv->last_req_quiet == true)
+      if (srv->last_req_sent != srv->last_req_sent_nq)
         {
           omc_srv_send_noop(mc, srv, false);
         }
-      if (srv->last_req_recvd < srv->last_nq_req_sent)
+      if (srv->last_req_recvd < srv->last_req_sent_nq)
         {
           omc_srv_debug(srv, "polling %d for POLLIN", srv->sock);
           mc->server_polls[n].events |= POLLIN;
@@ -583,7 +582,7 @@ omc_srv_reset(omcache_t *mc, omc_srv_t *srv, const char *log_msg)
   srv->conn_timeout = 0;
   srv->last_req_recvd = 0;
   srv->last_req_sent = 0;
-  srv->last_req_quiet = false;
+  srv->last_req_sent_nq = 0;
   srv->recv_buffer.r = srv->recv_buffer.base;
   srv->recv_buffer.w = srv->recv_buffer.base;
   srv->send_buffer.r = srv->send_buffer.base;
@@ -929,7 +928,7 @@ static int omc_srv_read(omcache_t *mc, omc_srv_t *srv, omc_resp_lookup_t *rlooku
       srv->recv_buffer.r = srv->recv_buffer.base;
       srv->recv_buffer.w = srv->recv_buffer.base;
     }
-  if (srv->last_req_recvd >= srv->last_nq_req_sent)
+  if (srv->last_req_recvd >= srv->last_req_sent_nq)
     return OMCACHE_OK;
   return OMCACHE_AGAIN;
 }
@@ -974,7 +973,8 @@ static int omc_srv_io(omcache_t *mc, omc_srv_t *srv, omc_resp_lookup_t *rlookup)
           srv->send_buffer.w = srv->send_buffer.base;
         }
     }
-  if (srv->conn_timeout == 0 && srv->sock >= 0 && srv->last_req_recvd < srv->last_nq_req_sent)
+  if (srv->conn_timeout == 0 && srv->sock >= 0 &&
+      srv->last_req_recvd < srv->last_req_sent_nq)
     {
       ret = omc_srv_read(mc, srv, rlookup);
       if (ret == OMCACHE_AGAIN)
@@ -1023,7 +1023,14 @@ int omcache_io(omcache_t *mc,
         }
       else
         {
-          rlookup->requests = calloc(rlookup->req_id_max - rlookup->req_id_min + 1, sizeof(*rlookup->requests));
+          size_t req_id_range = rlookup->req_id_max - rlookup->req_id_min;
+          if (req_id_range >= 1000000)
+            {
+              omc_log(LOG_ERR, "request id range %u..%u too large; wraparound?",
+                      rlookup->req_id_min, rlookup->req_id_max);
+              return OMCACHE_INVALID;
+            }
+          rlookup->requests = calloc(req_id_range + 1, sizeof(*rlookup->requests));
           for (size_t i = 0; i < *req_count; i++)
             {
               uint32_t req_id = reqs[i].header.opaque;
@@ -1145,7 +1152,7 @@ int omcache_reset_buffers(omcache_t *mc)
       srv->recv_buffer.r = srv->recv_buffer.base;
       srv->recv_buffer.w = srv->recv_buffer.base;
       srv->last_req_recvd = srv->last_req_sent;
-      srv->last_nq_req_sent = srv->last_req_sent;
+      srv->last_req_sent_nq = srv->last_req_sent;
     }
   return OMCACHE_OK;
 }
@@ -1194,13 +1201,12 @@ static int omc_srv_submit(omcache_t *mc, omc_srv_t *srv,
   // set last_req_sent field now that we're about to send (or buffer) this
   protocol_binary_request_header *hdr = iov[0].iov_base;
   srv->last_req_sent = hdr->request.opaque;
-  srv->last_req_quiet = omc_is_request_quiet(hdr->request.opcode);
-  if (!srv->last_req_quiet)
-    srv->last_nq_req_sent = srv->last_req_sent;
+  if (!omc_is_request_quiet(hdr->request.opcode))
+    srv->last_req_sent_nq = srv->last_req_sent;
   omc_srv_debug(srv, "%c sending message: type 0x%hhx, id %u %s",
                 srv->connected ? '+' : '-',
                 hdr->request.opcode, hdr->request.opaque,
-                srv->last_req_quiet ? "(quiet)" : "");
+                omc_is_request_quiet(hdr->request.opcode) ? "(quiet)" : "");
 
   // make sure we're meant to write immediately and the connection is
   // established and the existing write buffer empty
@@ -1263,11 +1269,29 @@ static int omc_srv_submit(omcache_t *mc, omc_srv_t *srv,
   return OMCACHE_BUFFERED;
 }
 
+static void omc_req_id_check(omcache_t *mc, size_t req_count)
+{
+  // Note that we must take into account the fact that we may send implicit
+  // NOOPs to disconnected servers at this point so don't push the limit
+  if (UINT32_MAX - mc->req_id > (mc->server_count + req_count) * 2)
+    return;
+  omc_log(LOG_INFO, "performing req_id wraparound %u -> %u to handle %zu requests",
+          mc->req_id, 42, req_count);
+  mc->req_id = 42;
+  for (int i = 0; i < mc->server_count; i++)
+    if (mc->servers[i]->connected)
+      {
+        mc->servers[i]->last_req_recvd = 0;
+        omc_srv_send_noop(mc, mc->servers[i], false);
+      }
+}
+
 static int omc_srv_send_noop(omcache_t *mc, omc_srv_t *srv, bool init)
 {
   protocol_binary_request_noop req;
   memset(&req, 0, sizeof(req));
 
+  omc_req_id_check(mc, 1);
   req.message.header.request.magic = PROTOCOL_BINARY_REQ;
   req.message.header.request.opcode = PROTOCOL_BINARY_CMD_NOOP;
   req.message.header.request.datatype = PROTOCOL_BINARY_RAW_BYTES;
@@ -1358,6 +1382,9 @@ int omcache_command(omcache_t *mc,
           rps->reqs[rps->count ++] = *req;
         }
     }
+
+  // Force wraparound if we don't have enough req_ids available before it
+  omc_req_id_check(mc, req_count);
 
   for (int i = 0; i < mc->server_count; i ++)
     {
