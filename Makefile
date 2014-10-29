@@ -10,7 +10,7 @@ SHLIB_SO = libomcache.so
 SHLIB_V = $(SHLIB_SO).0
 OBJ = omcache.o commands.o
 CPPFLAGS ?= -Wall -Wextra
-CFLAGS ?= -g
+CFLAGS ?= -g -O2
 
 all: $(SHLIB_SO) $(STLIB_A)
 
