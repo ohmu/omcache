@@ -259,7 +259,7 @@ class OMcache(object):
         request_count[0] = len(keys)
         ret = _oc.omcache_get_multi(self.omc, ckeys, key_lens, len(keys),
                                     requests, request_count, _ffi.NULL, _ffi.NULL, 0)
-        self._omc_check("omcache_get_multi", ret, allowed=[_oc.OMCACHE_OK, _oc.OMCACHE_AGAIN])
+        self._omc_check("omcache_get_multi", ret, allowed=[_oc.OMCACHE_OK, _oc.OMCACHE_AGAIN, _oc.OMCACHE_BUFFERED])
         # now look for responses
         timeout = timeout if timeout is not None else self.io_timeout
         values = _ffi.new("omcache_value_t[]", len(keys))

@@ -34,7 +34,7 @@ typedef struct omcache_req_s {
                                 ///  use when the request type does not use
                                 ///  a key (NOOP, VERSION and STATS).
                                 ///  -1 when server is selected by key.
-    struct protocol_binary_request_header_s {
+    struct omcache_req_header_s {
         uint8_t magic;          ///< Always PROTOCOL_BINARY_REQ (0x80),
                                 ///  set by OMcache
         uint8_t opcode;         ///< Command type
