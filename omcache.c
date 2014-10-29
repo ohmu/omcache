@@ -547,6 +547,7 @@ static int omc_ketama_lookup(omcache_t *mc, const unsigned char *key, size_t key
   const omc_ketama_point_t *first = mc->ketama->points, *last = mc->ketama->points + mc->ketama->point_count;
   const omc_ketama_point_t *left = first, *right = last, *selected;
   bool wrap = false;
+  int64_t now = 0;
 
   while (left < right)
     {
@@ -565,6 +566,15 @@ static int omc_ketama_lookup(omcache_t *mc, const unsigned char *key, size_t key
     {
       if (selected != last)
         {
+          // try to bring disabled servers back online but don't select them
+          // yet as we need to (asynchronously) verify that they're usable
+          if (selected->srv->sock == -1 && selected->srv->disabled)
+            {
+              if (now == 0)
+                now = omc_msec();
+              if (now > selected->srv->retry_at)
+                omc_srv_connect(mc, selected->srv);
+            }
           skipped ++;
           continue;
         }
