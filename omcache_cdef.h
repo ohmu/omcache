@@ -170,8 +170,8 @@ typedef void (omcache_log_callback_func)(void *context, int level, const char *m
 
 /**
  * Built-in logging function to log to standard error.
- * @param context Opaque context (unused in this function).
- * @param level Log message level; levels are defined in <sys/syslog.h>.
+ * @param context Const char * log message prefix.
+ * @param level Log message level.
  * @param msg The actual log message.
  */
 void omcache_log_stderr(void *context, int level, const char *msg);

@@ -224,11 +224,18 @@ static int omc_map_mc_status_to_ret_code(protocol_binary_response_status status)
     }
 }
 
-void omcache_log_stderr(void *context __attribute__((unused)),
-                        int level __attribute__((unused)),
+void omcache_log_stderr(void *context,
+                        int level,
                         const char *msg)
 {
-  fprintf(stderr, "%s\n", msg);
+  fprintf(stderr, "%s%s %s\n",
+          context ? (const char *) context : "",
+          level == LOG_ERR ? "ERROR" :
+          level == LOG_WARNING ? "WARNING" :
+          level == LOG_NOTICE ? "NOTICE" :
+          level == LOG_INFO ? "INFO" :
+          level == LOG_DEBUG ? "DEBUG" :
+          "?", msg);
 }
 
 static inline int64_t omc_msec()
