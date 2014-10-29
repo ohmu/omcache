@@ -225,13 +225,9 @@ int omcache_reset_buffers(omcache_t *mc);
  * Perform I/O with memcached servers: establish connections, read
  * responses, write requests.
  * @param mc OMcache handle.
- * @param reqs Array of requests for which we want responses.  Once
- *             responses have been found for any requests this function
- *             returns instead of polling on the sockets to allow callers to
- *             process the data.  The array will be modified by the call to
- *             contain requests that are still pending after this call.
- * @param req_count Number of requests in reqs array.  Will be modified to
- *                  contain the number of pending requests after this call.
+ * @param reqs Array of requests for which we want responses.
+ * @param req_count Number of requests in reqs array.  Will be zeroed once
+ *                  all requests have been handled.
  * @param values Pointer to an array of omcache_value_t structures to store
  *               the responses found.  If there aren't enough value structs
  *               to store all requests found the responses will be silently
@@ -568,9 +564,8 @@ int omcache_get(omcache_t *mc,
  *             of I/O operations the pending requests are stored in this
  *             array which can be passed to omcache_io() to complete the
  *             remaining requests.
- * @param req_count Number of requests in reqs array.  Will be modified to
- *                  contain the number of pending requests after this call.
- *                  req_count must be equal to or greater than key_count.
+ * @param req_count Number of requests in reqs array.  Will be zeroed once
+ *                  all requests have been handled.
  * @param values Array to store responses in, handled like in omcache_io().
  * @param value_count values length, handled like in omcache_io().
  * @param timeout_msec Maximum number of milliseconds to block while waiting

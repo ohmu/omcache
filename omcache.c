@@ -127,19 +127,15 @@ struct omcache_s
 
 typedef struct omc_resp_lookup_s
 {
+  // NOTE: values_returned is the number of responses we've actually been
+  // able to store to *resps.  We don't usually have to worry about
+  // values_size, but for requests that return more than one response per
+  // request (at least stat) we must make sure we don't overflow values.
   omcache_value_t *values;
   size_t values_size;
-  // NOTE: values_returned is the number of responses we've actually been
-  // able to store to *resps.  requests_found is the number of requests
-  // we've seen some response for.  The two numbers may not match in case
-  // the requests receives more than one response (stat request, for
-  // example) or in the case the *resps buffer is too small.
   size_t values_returned;
-  size_t requests_found;
-  size_t req_id_count;
   uint32_t req_id_min;
   uint32_t req_id_max;
-  omcache_req_t **requests;
 } omc_resp_lookup_t;
 
 static int omc_srv_free(omcache_t *mc, omc_srv_t *srv);
@@ -934,15 +930,8 @@ static int omc_srv_read(omcache_t *mc, omc_srv_t *srv, omc_resp_lookup_t *rlooku
       // return if it it was requested and we have room for the response
       if (rlookup &&
           hdr->response.opaque >= rlookup->req_id_min &&
-          hdr->response.opaque <= rlookup->req_id_max &&
-          rlookup->requests[hdr->response.opaque - rlookup->req_id_min])
+          hdr->response.opaque <= rlookup->req_id_max)
         {
-          omcache_req_t *req = rlookup->requests[hdr->response.opaque - rlookup->req_id_min];
-          if (req->header.magic == PROTOCOL_BINARY_REQ)
-            {
-              req->header.magic = 0; // "found"
-              rlookup->requests_found ++;
-            }
           if (rlookup->values_size <= rlookup->values_returned)
             {
               omc_srv_log(LOG_WARNING, srv,
@@ -1030,50 +1019,22 @@ int omcache_io(omcache_t *mc,
                omcache_value_t *values, size_t *value_count,
                int32_t timeout_msec)
 {
-  int again, ret = OMCACHE_OK;
+  int again = 0, ret = OMCACHE_OK;
   bool nothing_to_poll = false;
   int64_t now = omc_msec();
   int64_t timeout_abs = (timeout_msec > 0) ? now + timeout_msec : - 1;
-  omc_resp_lookup_t rlookup_st, *rlookup = NULL;
+  omc_resp_lookup_t rlookup = {0};
 
   if (reqs && req_count && *req_count && values && value_count && *value_count)
     {
-      rlookup = &rlookup_st;
-      rlookup->values_returned = 0;
-      rlookup->requests_found = 0;
-      rlookup->values = values;
-      rlookup->values_size = *value_count;
-      rlookup->req_id_count = *req_count;
-      rlookup->req_id_min = 0xffffffff;
-      rlookup->req_id_max = 0;
-      for (size_t i = 0; i < *req_count; i ++)
-        {
-          uint32_t req_id = reqs[i].header.opaque;
-          if (req_id < rlookup->req_id_min)
-            rlookup->req_id_min = req_id;
-          if (req_id > rlookup->req_id_max)
-            rlookup->req_id_max = req_id;
-        }
-      if (*req_count == 1)
-        {
-          rlookup->requests = &reqs;
-        }
-      else
-        {
-          size_t req_id_range = rlookup->req_id_max - rlookup->req_id_min;
-          if (req_id_range >= 1000000)
-            {
-              omc_log(LOG_ERR, "request id range %u..%u too large; wraparound?",
-                      rlookup->req_id_min, rlookup->req_id_max);
-              return OMCACHE_INVALID;
-            }
-          rlookup->requests = calloc(req_id_range + 1, sizeof(*rlookup->requests));
-          for (size_t i = 0; i < *req_count; i++)
-            {
-              uint32_t req_id = reqs[i].header.opaque;
-              rlookup->requests[req_id - rlookup->req_id_min] = &reqs[i];
-            }
-        }
+      rlookup.values = values;
+      rlookup.values_size = *value_count;
+      rlookup.req_id_min = reqs[0].header.opaque;
+      rlookup.req_id_max = reqs[*req_count - 1].header.opaque;
+      if (rlookup.req_id_max - rlookup.req_id_min + 1 != *req_count)
+        return OMCACHE_INVALID;
+      if (*value_count < *req_count)
+        return OMCACHE_INVALID;
       *value_count = 0;
     }
   else
@@ -1082,15 +1043,12 @@ int omcache_io(omcache_t *mc,
         *req_count = 0;
       if (value_count)
         *value_count = 0;
-
     }
 
   while (ret == OMCACHE_OK || ret == OMCACHE_AGAIN)
     {
-      omc_debug("looking for %zu req_ids (%u..%u); timeout in %lld msec",
-                rlookup ? rlookup->req_id_count : 0,
-                rlookup ? rlookup->req_id_min : 0,
-                rlookup ? rlookup->req_id_max : 0,
+      omc_debug("looking for req_ids (%u..%u); timeout in %lld msec",
+                rlookup.req_id_min, rlookup.req_id_max,
                 (long long) (timeout_abs != -1 ? timeout_abs - omc_msec() : -1));
       if (timeout_abs >= 0)
         {
@@ -1132,7 +1090,7 @@ int omcache_io(omcache_t *mc,
                 }
               continue;
             }
-          ret = omc_srv_io(mc, srv, rlookup);
+          ret = omc_srv_io(mc, srv, &rlookup);
           omc_srv_debug(srv, "io: %s", omcache_strerror(ret));
           if (ret == OMCACHE_AGAIN)
             again ++;
@@ -1141,15 +1099,15 @@ int omcache_io(omcache_t *mc,
         }
 
       omc_debug("status %d (%s), %zu responses found, timeout %d",
-                ret, omcache_strerror(ret), rlookup ? rlookup->values_returned : 0, timeout_msec);
+                ret, omcache_strerror(ret), rlookup.values_returned, timeout_msec);
 
-      // break the or we found any responses: the receive buffer could be
+      // break the loop if we found any responses: the receive buffer could be
       // overwritten by new calls to omc_srv_io so we need to allow the
       // caller to process the response before resuming reads.
-      if (rlookup && (rlookup->values_returned || rlookup->requests_found == *req_count))
+      if (rlookup.values_returned)
         {
           // don't want to return OMCACHE_AGAIN if we found our key
-          omc_debug("found %zu responses, breaking loop", rlookup->values_returned);
+          omc_debug("found %zu responses, breaking loop", rlookup.values_returned);
           ret = OMCACHE_OK;
           again = 0;
           break;
@@ -1159,25 +1117,14 @@ int omcache_io(omcache_t *mc,
       if (timeout_msec == 0)
         break;
     }
+  if (nothing_to_poll && req_count)
+    *req_count = 0;
+  if (value_count)
+    *value_count = rlookup.values_returned;
+  if (nothing_to_poll)
+    return OMCACHE_OK;
   if (ret == OMCACHE_OK && again > 0)
-    ret = OMCACHE_AGAIN;
-  if (rlookup)
-    {
-      // figure out which requests weren't finished yet, unless we've given
-      // up on polling which means that the requests we sent out are not
-      // going to be answered (for examples misses to GETQ)
-      size_t remaining_requests = 0;
-      if (!nothing_to_poll)
-        for (size_t i = 0; i < rlookup->req_id_count; i++)
-          if (reqs[i].header.magic)
-            memmove(&reqs[remaining_requests++], &reqs[i], sizeof(omcache_req_t));
-      *req_count = remaining_requests;
-      *value_count = rlookup->values_returned;
-      if (rlookup->req_id_count > 1)
-        free(rlookup->requests);
-      if (ret == OMCACHE_OK && *req_count)
-        ret = OMCACHE_AGAIN;
-    }
+    return OMCACHE_AGAIN;
   return ret;
 }
 
