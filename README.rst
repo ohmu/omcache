@@ -1,16 +1,16 @@
 OMcache
 =======
 
-OMcache is a low level C library for accessing memcached servers.  The goals
-of the OMcache project are stable API and ABI and 'easy' integration into
-complex applications and systems; OMcache specifically does not mask any
-signals or call any blocking functions.  [FIXME: this is not really true at
-the moment, OMcache uses getaddrinfo for name resolution which blocks, pass
-IP addresses for OMcache to avoid blocking for now.]
+OMcache is a C and Python library for accessing memcached servers.  The
+goals of the OMcache project are a stable API and ABI and 'easy' integration
+into complex applications and systems.  OMcache is meant to be used as a
+middleware layer to provide redundancy and consistency to a memcached server
+cluster.  OMcache specifically tries to avoid ABI brekage and does not mask
+any signals or call blocking functions to help integrating it into other
+solutions.
 
-**NOTE** OMcache is still very much work-in-progress and interfaces can
-change without notice and the git tree may be rebased so don't rely on this
-just yet.
+FIXME: Currently OMcache uses getaddrinfo for name resolution which blocks,
+pass IP addresses for OMcache to avoid blocking for now.
 
 ::
 
@@ -61,9 +61,17 @@ OMcache is released under the Apache License, Version 2.0.
 For the exact license terms, see `LICENSE` and
 http://opensource.org/licenses/Apache-2.0 .
 
+Credits
+=======
+
+OMcache was created and is maintained by Oskari Saarenmaa <os@ohmu.fi>. 
+F-Secure Corporation provided the infrastructure for testing OMcache in its
+initial development process and contributed to the pylibmc and libmemcached
+compatibility layers as well as ported pgmemcache (PostgreSQL memcached
+interface) to run on OMcache.
+
 Contact
 =======
 
-OMcache is maintained by Oskari Saarenmaa <os@ohmu.fi>, bug reports and
-patches are very welcome, please post them as GitHub issues and pull
-requests at https://github.com/saaros/omcache
+Bug reports and patches are very welcome, please post them as GitHub issues
+and pull requests at https://github.com/saaros/omcache
