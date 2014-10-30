@@ -9,6 +9,7 @@
 from functools import wraps
 from sys import version_info
 import cffi
+import logging
 import os
 
 _ffi = cffi.FFI()
@@ -104,7 +105,25 @@ class OMcache(object):
     def log(self, log):
         self._log = log
         log_cb = self._omc_log_cb if log else _ffi.NULL
-        _oc.omcache_set_log_callback(self.omc, log_cb, _ffi.NULL)
+        level = 0
+        if log and hasattr(log, "getEffectiveLevel"):
+            pyloglevel = log.getEffectiveLevel()
+            if pyloglevel <= logging.DEBUG:
+                level = LOG_DEBUG
+            elif pyloglevel <= logging.INFO:
+                level = LOG_INFO
+            elif pyloglevel < logging.WARNING:
+                # NOTICE is something between INFO and WARNING, not defined
+                # in Python by default.
+                level = LOG_NOTICE
+            elif pyloglevel <= logging.WARNING:
+                level = LOG_WARNING
+            elif pyloglevel <= logging.ERROR:
+                level = LOG_ERR
+            else:
+                # OMcache doesn't use anything more severe than LOG_ERR
+                level = LOG_ERR - 1
+        _oc.omcache_set_log_callback(self.omc, level, log_cb, _ffi.NULL)
 
     @staticmethod
     def _omc_check(name, ret, return_buffer=False, allowed=[_oc.OMCACHE_BUFFERED]):

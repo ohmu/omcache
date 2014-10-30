@@ -179,11 +179,12 @@ void omcache_log_stderr(void *context, int level, const char *msg);
 /**
  * Set a log callback for the OMcache handle.
  * @param mc OMcache handle.
+ * @param level Maximum event level for logging, 0 for everything but debug.
  * @param func Callback function to call for each generated log message.
  * @param resp_cb_context Opaque context to pass to the callback function.
  * @return OMCACHE_OK on success.
  */
-int omcache_set_log_callback(omcache_t *mc, omcache_log_callback_func *func, void *context);
+int omcache_set_log_callback(omcache_t *mc, int level, omcache_log_callback_func *func, void *context);
 
 /**
  * Response callback type.

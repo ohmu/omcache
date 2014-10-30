@@ -35,17 +35,18 @@
 
 
 #define omc_log(pri,fmt,...) ({ \
-    if (mc->log_cb) { \
+    if (mc->log_cb && pri <= mc->log_level) { \
       char *log_msg_; \
-      asprintf(&log_msg_, "[%.03f] omcache/%s:%d: " fmt, \
-               (omc_msec() - mc->init_msec) / 1000.0, __func__, __LINE__, __VA_ARGS__); \
-      mc->log_cb(mc->log_context, (pri), log_msg_); \
-      free(log_msg_); \
+      if (asprintf(&log_msg_, "[%.03f] omcache/%s:%d: " fmt, \
+                   (omc_msec() - mc->init_msec) / 1000.0, __func__, __LINE__, __VA_ARGS__) > 0) { \
+        mc->log_cb(mc->log_context, (pri), log_msg_); \
+        free(log_msg_); \
+      } \
     } NULL; })
 #define omc_srv_log(pri,srv,fmt,...) \
     omc_log(pri, "[%s:%s] " fmt, (srv)->hostname, (srv)->port, __VA_ARGS__)
 
-#ifdef DEBUG
+#ifndef NDEBUG
 #  define omc_debug(...) omc_log(LOG_DEBUG, __VA_ARGS__)
 #  define omc_srv_debug(...) omc_srv_log(LOG_DEBUG, __VA_ARGS__)
 #else
@@ -113,6 +114,7 @@ struct omcache_s
   // settings
   omcache_log_callback_func *log_cb;
   void *log_context;
+  int log_level;
 
   omcache_response_callback_func *resp_cb;
   void *resp_cb_context;
@@ -381,10 +383,11 @@ int omcache_set_servers(omcache_t *mc, const char *servers)
   return OMCACHE_OK;
 }
 
-int omcache_set_log_callback(omcache_t *mc, omcache_log_callback_func *func, void *context)
+int omcache_set_log_callback(omcache_t *mc, int level, omcache_log_callback_func *func, void *context)
 {
   mc->log_cb = func;
   mc->log_context = context;
+  mc->log_level = level ? level : LOG_DEBUG - 1;
   return OMCACHE_OK;
 }
 
@@ -587,7 +590,7 @@ static int omc_ketama_lookup(omcache_t *mc, const unsigned char *key, size_t key
       selected = first;
     }
   if (skipped)
-    omc_log(LOG_NOTICE, "ketama skipped %zu disabled server points", skipped);
+    omc_log(LOG_INFO, "ketama skipped %zu disabled server points", skipped);
   return selected->srv->list_index;
 }
 
