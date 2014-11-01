@@ -13,7 +13,7 @@
 
 START_TEST(test_server_list)
 {
-  ot_init_omcache(oc, LOG_DEBUG);
+  omcache_t *oc = ot_init_omcache(0, LOG_DEBUG);
   ck_assert_int_eq(omcache_server_index_for_key(oc, (cuc *) "foo", 3), 0);
   ck_assert_ptr_eq(omcache_server_info(oc, 0), NULL);
   // NOTE: omcache sorts server list internally, host and portnames are not
@@ -69,7 +69,7 @@ END_TEST
 
 START_TEST(test_no_servers)
 {
-  ot_init_omcache(oc, LOG_DEBUG);
+  omcache_t *oc = ot_init_omcache(0, LOG_DEBUG);
   ck_omcache(omcache_noop(oc, 0, 0), OMCACHE_NO_SERVERS);
   ck_omcache_ok(omcache_io(oc, NULL, NULL, NULL, NULL, 0));
   omcache_free(oc);

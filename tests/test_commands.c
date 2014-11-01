@@ -20,14 +20,7 @@ START_TEST(test_get)
   size_t val_len, get_val_len;
   uint32_t flags;
   uint64_t cas;
-  int mc_port1, mc_port2;
-  char srvstr[100];
-
-  ot_init_omcache(oc, LOG_DEBUG);
-  mc_port1 = ot_start_memcached(NULL);
-  mc_port2 = ot_start_memcached(NULL);
-  snprintf(srvstr, sizeof(srvstr), "127.0.0.1:%d, 127.0.0.1:%d", mc_port1, mc_port2);
-  ck_omcache_ok(omcache_set_servers(oc, srvstr));
+  omcache_t *oc = ot_init_omcache(2, LOG_DEBUG);
 
   ck_omcache(omcache_get(oc, (cuc *) "foo", 3, NULL, NULL, NULL, NULL, TIMEOUT), OMCACHE_NOT_FOUND);
   ck_omcache(omcache_set(oc, (cuc *) "foo", 3, (cuc *) "bar", 3, 0, 42, 0, TIMEOUT), OMCACHE_OK);
@@ -56,8 +49,6 @@ START_TEST(test_get)
   free(val);
 
   omcache_free(oc);
-  ot_stop_memcached(mc_port1);
-  ot_stop_memcached(mc_port2);
 }
 END_TEST
 

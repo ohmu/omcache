@@ -38,12 +38,10 @@
 
 #define ck_omcache_ok(c) ck_omcache((c), OMCACHE_OK)
 
-#define ot_init_omcache(v,loglevel) \
-  omcache_t *v = omcache_init(); \
-  omcache_set_log_callback(v, (loglevel), omcache_log_stderr, NULL)
-
 typedef const unsigned char cuc;
 
+omcache_t *ot_init_omcache(int server_count, int log_level);
+int ot_get_memcached(size_t server_index);
 int ot_start_memcached(const char *addr);
 int ot_stop_memcached(int port);
 

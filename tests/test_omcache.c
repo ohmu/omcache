@@ -16,8 +16,23 @@
 
 #include "test_omcache.h"
 
-static struct {pid_t pid; unsigned short port; } memcacheds[1000];
+struct mc_info_s {
+  pid_t parent_pid;
+  pid_t pid;
+  unsigned short port;
+};
+
+static struct mc_info_s memcacheds[1000];
 static size_t memcached_count;
+
+int ot_get_memcached(size_t server_index)
+{
+  if (server_index > memcached_count)
+    return -1;
+  if (server_index == memcached_count)
+    ot_start_memcached(NULL);
+  return memcacheds[server_index].port;
+}
 
 int ot_start_memcached(const char *addr)
 {
@@ -44,6 +59,7 @@ int ot_start_memcached(const char *addr)
     }
   // XXX: sleep 0.1s to allow memcached to start
   usleep(100000);
+  memcacheds[memcached_count].parent_pid = getpid();
   memcacheds[memcached_count].pid = pid;
   memcacheds[memcached_count++].port = port;
   return port;
@@ -58,9 +74,8 @@ static void kill_memcached(pid_t pid, int port)
 static void kill_memcacheds(void)
 {
   for (size_t i = 0; i < memcached_count; i ++)
-    {
+    if (memcacheds[i].parent_pid == getpid())
       kill_memcached(memcacheds[i].pid, memcacheds[i].port);
-    }
 }
 
 int ot_stop_memcached(int port)
@@ -76,9 +91,26 @@ int ot_stop_memcached(int port)
   return 0;
 }
 
+omcache_t *ot_init_omcache(int server_count, int log_level)
+{
+  char srvstr[2048], *p = srvstr;
+  omcache_t *oc = omcache_init();
+  omcache_set_log_callback(oc, log_level, omcache_log_stderr, NULL);
+  if (server_count == 0)
+    return oc;
+  for (int i = 0; i < server_count; i ++)
+    p += sprintf(p, "%s127.0.0.1:%d", i == 0 ? "" : ",", ot_get_memcached(i));
+  omcache_set_servers(oc, srvstr);
+  return oc;
+}
+
 int main(void)
 {
   atexit(kill_memcacheds);
+
+  // start two memcacheds in the parent process
+  ot_start_memcached(NULL);
+  ot_start_memcached(NULL);
 
   SRunner *sr = srunner_create(NULL);
   for (size_t i = 0; i < sizeof(suites) / sizeof(suites[0]); i ++)
