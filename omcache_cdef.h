@@ -478,6 +478,7 @@ int omcache_replace(omcache_t *mc,
  * @param expiration Expire the value after this time.  If set to
  *                   OMCACHE_DELTA_NO_ADD the counter is not initialized in
  *                   case it does not yet exist in the backend.
+ * @param value Counter value after the increment operation.
  * @param timeout_msec Maximum number of milliseconds to block while waiting
  *                     for I/O to complete.  Zero means no blocking at all
  *                     and a negative value blocks indefinitely.
@@ -502,6 +503,7 @@ int omcache_increment(omcache_t *mc,
  * @param expiration Expire the value after this time.  If set to
  *                   OMCACHE_DELTA_NO_ADD the counter is not initialized in
  *                   case it does not yet exist in the backend.
+ * @param value Counter value after the decrement operation.
  * @param timeout_msec Maximum number of milliseconds to block while waiting
  *                     for I/O to complete.  Zero means no blocking at all
  *                     and a negative value blocks indefinitely.

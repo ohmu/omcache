@@ -159,6 +159,8 @@ static int omc_ctr_cmd(omcache_t *mc, protocol_binary_command opcode,
   omcache_value_t value = {0};
   size_t req_count = 1, value_count = 1;
   int ret = omcache_command(mc, &req, &req_count, &value, &value_count, timeout_msec);
+  if (ret == OMCACHE_OK && value_count)
+    ret = value.status;
   if (valuep)
     *valuep = (ret == OMCACHE_OK) ? value.delta_value : 0;
   return ret;
