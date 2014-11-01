@@ -27,14 +27,12 @@ static size_t memcached_count;
 
 int ot_get_memcached(size_t server_index)
 {
-  if (server_index > memcached_count)
-    return -1;
-  if (server_index == memcached_count)
-    ot_start_memcached(NULL);
+  while (server_index >= memcached_count)
+    ot_start_memcached(NULL, NULL);
   return memcacheds[server_index].port;
 }
 
-int ot_start_memcached(const char *addr)
+int ot_start_memcached(const char *addr, pid_t *pidp)
 {
   if (memcached_count >= sizeof(memcacheds)/sizeof(memcacheds[0]))
     {
@@ -62,6 +60,8 @@ int ot_start_memcached(const char *addr)
   memcacheds[memcached_count].parent_pid = getpid();
   memcacheds[memcached_count].pid = pid;
   memcacheds[memcached_count++].port = port;
+  if (pidp)
+    *pidp = pid;
   return port;
 }
 
@@ -104,13 +104,23 @@ omcache_t *ot_init_omcache(int server_count, int log_level)
   return oc;
 }
 
+int64_t ot_msec(void)
+{
+  struct timespec ts;
+#ifdef CLOCK_MONOTONIC_COARSE
+  if (clock_gettime(CLOCK_MONOTONIC_COARSE, &ts) == -1)
+#endif
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+  return ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+
 int main(void)
 {
   atexit(kill_memcacheds);
 
   // start two memcacheds in the parent process
-  ot_start_memcached(NULL);
-  ot_start_memcached(NULL);
+  ot_start_memcached(NULL, NULL);
+  ot_start_memcached(NULL, NULL);
 
   SRunner *sr = srunner_create(NULL);
   for (size_t i = 0; i < sizeof(suites) / sizeof(suites[0]); i ++)

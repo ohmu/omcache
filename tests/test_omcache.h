@@ -45,15 +45,19 @@ typedef const unsigned char cuc;
 
 omcache_t *ot_init_omcache(int server_count, int log_level);
 int ot_get_memcached(size_t server_index);
-int ot_start_memcached(const char *addr);
+int ot_start_memcached(const char *addr, pid_t *pid);
 int ot_stop_memcached(int port);
+int64_t ot_msec(void);
 
 Suite *ot_suite_commands(void);
+Suite *ot_suite_failures(void);
 Suite *ot_suite_servers(void);
 
 typedef Suite *(suite_init_cb)(void);
 static suite_init_cb *const suites[] = {
-  ot_suite_commands, ot_suite_servers,
+  ot_suite_commands,
+  ot_suite_failures,
+  ot_suite_servers,
   };
 
 #endif // !_TEST_OMCACHE_H

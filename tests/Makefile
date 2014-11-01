@@ -1,5 +1,5 @@
 TEST = test_omcache
-OBJS = test_omcache.o test_commands.o test_servers.o
+OBJS = test_omcache.o test_commands.o test_failures.o test_servers.o
 CPPFLAGS ?= -Wall -Wextra
 CFLAGS ?= -g -O2
 
