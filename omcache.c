@@ -859,17 +859,26 @@ static int omc_srv_read(omcache_t *mc, omc_srv_t *srv, omc_resp_lookup_t *rlooku
                         i, buffered, msg_size);
           // read more data if possible, in case we're asked to not move the
           // buffer this may fail and the caller needs to try again later.
-          ret = omc_do_read(mc, srv, msg_size, keep_buffers);
+          ret = omc_do_read(mc, srv, msg_size - buffered, keep_buffers);
           if (ret == OMCACHE_BUFFER_FULL && !keep_buffers)
             {
               // the message is too big to fit in our receive buffer at all,
               // discard it (by resetting connection.)
-              if (mc->resp_cb)
+              memset(&value, 0, sizeof(value));
+              value.status = OMCACHE_BUFFER_FULL;
+              if (buffered >= sizeof(hdr->bytes) + hdr->response.extlen + be16toh(hdr->response.keylen))
                 {
-                  value.status = OMCACHE_BUFFER_FULL;
                   value.key = srv->recv_buffer.r + sizeof(hdr->bytes) + hdr->response.extlen;
                   value.key_len = be16toh(hdr->response.keylen);
-                  mc->resp_cb(mc, &value, mc->resp_cb_context);
+                }
+              if (mc->resp_cb)
+                mc->resp_cb(mc, &value, mc->resp_cb_context);
+              if (rlookup &&
+                  rlookup->values_size > rlookup->values_returned &&
+                  hdr->response.opaque >= rlookup->req_id_min &&
+                  hdr->response.opaque <= rlookup->req_id_max)
+                {
+                  rlookup->values[rlookup->values_returned++] = value;
                 }
               errno = EMSGSIZE;
               omc_srv_reset(mc, srv, "buffer full - can't handle response");
