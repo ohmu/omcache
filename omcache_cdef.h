@@ -16,6 +16,7 @@ typedef enum omcache_ret_e {
   OMCACHE_OK = 0x00,               ///< Success
   OMCACHE_NOT_FOUND = 0x01,        ///< Key not found from memcached
   OMCACHE_KEY_EXISTS = 0x02,       ///< Conflicting key exists in memcached
+  OMCACHE_TOO_LARGE_VALUE = 0x03,  ///< Value size exceeds maximum
   OMCACHE_DELTA_BAD_VALUE = 0x06,  ///< Existing value can not be
                                    ///  incremented or decremented
   OMCACHE_FAIL = 0x0FFF,           ///< Command failed in memcached
