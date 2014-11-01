@@ -56,3 +56,7 @@ deb:
 
 clean:
 	$(RM) $(STLIB_A) $(SHLIB_V) $(SHLIB_SO) $(OBJ)
+	$(MAKE) -C tests clean
+
+check:
+	$(MAKE) -C tests check

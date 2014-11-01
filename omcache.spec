@@ -6,6 +6,7 @@ Group:          System Environment/Libraries
 URL:            https://github.com/saaros/omcache/
 License:        ASL 2.0
 Source0:        omcache-rpm-src.tar.gz
+BuildRequires:  check-devel
 
 %description
 OMcache is a low level C library for accessing memcached servers.  The goals
@@ -52,6 +53,9 @@ rm -rf %{buildroot}
 make install DESTDIR=%{buildroot} \
     PREFIX=%{_prefix} LIBDIR=%{_libdir} \
     PYTHONDIRS="%{python2_sitelib} %{python3_sitelib}"
+
+%check
+make check
 
 %clean
 rm -rf %{buildroot}
