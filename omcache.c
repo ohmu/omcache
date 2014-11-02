@@ -1095,7 +1095,7 @@ int omcache_io(omcache_t *mc,
           if (!pfds[i].revents)
             {
               // reset connections that have failed
-              if (now - srv->last_io_attempt > mc->dead_timeout_msec)
+              if (now - srv->last_io_attempt >= mc->dead_timeout_msec)
                 {
                   errno = ETIMEDOUT;
                   omc_srv_reset(mc, srv, "io timeout");

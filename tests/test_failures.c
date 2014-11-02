@@ -48,6 +48,7 @@ START_TEST(test_suspended_memcache)
 
   // suspend one memcached and find out its server index
   kill(mc_pid2, SIGSTOP);
+  usleep(100000);  // allow 0.1 for SIGSTOP to be delivered
   for (int i = 0; i < 3; i ++)
     {
       omcache_server_info_t *sinfo = omcache_server_info(oc, i);
