@@ -34,6 +34,7 @@ START_TEST(test_suspended_memcache)
   sprintf(strbuf, "127.0.0.1:%d,127.0.0.1:%d,127.0.0.1:%d", mc_port0, mc_port1, mc_port2);
   ck_omcache_ok(omcache_set_servers(oc, strbuf));
   ck_omcache_ok(omcache_set_dead_timeout(oc, 1000));
+  ck_omcache_ok(omcache_set_connect_timeout(oc, 3000));
   ck_omcache_ok(omcache_set_reconnect_timeout(oc, 4000));
   ck_omcache_ok(omcache_set_buffering(oc, true));
   for (int i = 0; i < 1000; i ++)

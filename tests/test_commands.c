@@ -93,6 +93,11 @@ START_TEST(test_set_get_delete)
   val_len = 2048 * 1024;
   val = malloc(val_len);
   memset(val, 'O', val_len);
+  // try with a too small send buffer
+  omcache_set_send_buffer_max_size(oc, 5000);
+  ck_omcache(omcache_set(oc, key, key_len, val, val_len, 0, 0, 0, TIMEOUT), OMCACHE_BUFFER_FULL);
+  // make buffer larger, but try to send more than MC will accept
+  omcache_set_send_buffer_max_size(oc, 5000000);
   // memcached allows 1mb values by default
   ck_omcache(omcache_set(oc, key, key_len, val, val_len, 0, 0, 0, TIMEOUT), OMCACHE_TOO_LARGE_VALUE);
   val_len = 1000 * 1000;
@@ -201,6 +206,149 @@ START_TEST(test_increment_and_decrement)
 }
 END_TEST
 
+START_TEST(test_req_id_wraparound)
+{
+  // NOTE: omcache_t is opaque, but we need to mangle req_id for this test
+  // if omcache_s layout changes this test will break in interesting ways.
+  struct omcache_s_TEST
+  {
+    int64_t init_msec;
+    uint32_t req_id;
+  };
+  char *keys[1000];
+  size_t key_lens[1000];
+  omcache_t *oc = ot_init_omcache(2, LOG_INFO);
+  struct omcache_s_TEST *oc_s = (struct omcache_s_TEST *) oc;
+  ck_omcache_ok(omcache_set_buffering(oc, true));
+  for (int i = 0; i < 1000; i ++)
+    {
+      key_lens[i] = asprintf(&keys[i], "test_req_id_wraparound_%d", i);
+      ck_omcache(OMCACHE_BUFFERED,
+        omcache_set(oc, (cuc *) keys[i], key_lens[i], (cuc *) keys[i], key_lens[i], 0, 0, 0, 0));
+    }
+  ck_omcache_ok(omcache_set_buffering(oc, false));
+  ck_omcache_ok(omcache_io(oc, NULL, NULL, NULL, NULL, 5000));
+
+  // set req_id to 100 below maximum and issue a multiget for 1000 entries which should force a wraparound
+  uint32_t pre_wrap_req_id = oc_s->req_id;
+  oc_s->req_id = UINT32_MAX - 100;
+
+  omcache_value_t values[1000];
+  size_t value_count = 1000, values_found = 0;
+  omcache_req_t reqs[1000];
+  size_t req_count = 1000;
+  ck_omcache_ok(omcache_get_multi(oc, (cuc **) keys, key_lens, 1000, reqs, &req_count, values, &value_count, 5000));
+  values_found = value_count;
+  while (req_count > 0)
+    {
+      value_count = 1000;
+      ck_omcache_ok(omcache_io(oc, reqs, &req_count, values, &value_count, 5000));
+      values_found += value_count;
+    }
+  ck_assert_int_eq(values_found, 1000);
+  ck_assert_uint_le(oc_s->req_id, pre_wrap_req_id);
+  for (int i = 0; i < 1000; i ++)
+    free(keys[i]);
+}
+END_TEST
+
+START_TEST(test_buffering)
+{
+  char *keys[1000];
+  size_t key_lens[1000];
+  omcache_t *oc = ot_init_omcache(3, LOG_INFO);
+  ck_omcache_ok(omcache_set_buffering(oc, true));
+  for (int i = 0; i < 1000; i += 2)
+    {
+      key_lens[i] = asprintf(&keys[i], "test_buffering_%d", i);
+      ck_omcache(OMCACHE_BUFFERED,
+        omcache_set(oc, (cuc *) keys[i], key_lens[i], (cuc *) keys[i], key_lens[i], 0, 0, 0, 0));
+    }
+  ck_omcache_ok(omcache_reset_buffers(oc));
+  for (int i = 1; i < 1000; i += 2)
+    {
+      key_lens[i] = asprintf(&keys[i], "test_buffering_%d", i);
+      ck_omcache(OMCACHE_BUFFERED,
+        omcache_set(oc, (cuc *) keys[i], key_lens[i], (cuc *) keys[i], key_lens[i], 0, 0, 0, 0));
+    }
+  ck_omcache_ok(omcache_set_buffering(oc, false));
+  ck_omcache_ok(omcache_io(oc, NULL, NULL, NULL, NULL, 5000));
+
+  // no even keys should be set
+  omcache_value_t values[1000];
+  size_t value_count = 1000, values_found = 0;
+  omcache_req_t reqs[1000];
+  size_t req_count = 1000;
+  ck_omcache_ok(omcache_get_multi(oc, (cuc **) keys, key_lens, 1000, reqs, &req_count, values, &value_count, 5000));
+  values_found = value_count;
+  while (req_count > 0)
+    {
+      value_count = 1000;
+      ck_omcache_ok(omcache_io(oc, reqs, &req_count, values, &value_count, 5000));
+      values_found += value_count;
+      // check that the last character of key is odd (ord("0") % 2 == 0)
+      for (size_t i = 0; i < value_count; i ++)
+        ck_assert_int_eq(1, values[i].key[values[i].key_len - 1] % 2);
+    }
+  ck_assert_int_eq(values_found, 500);
+
+  // test too low limits for value counts:
+  // omcache_get_multi fails with a too low value count
+  value_count = 1;
+  req_count = 1000;
+  ck_omcache(OMCACHE_INVALID,
+    omcache_get_multi(oc, (cuc **) keys, key_lens, 1000, reqs, &req_count, values, &value_count, 5000));
+  // but omcache_stat doesn't really know how many values we will receive,
+  // so it'll accept the request but silently drop some messages
+  ck_omcache_ok(omcache_stat(oc, "", values, &value_count, 0, 5000));
+  for (int i = 0; i < 1000; i ++)
+    free(keys[i]);
+}
+END_TEST
+
+static void test_response_callback_cb(omcache_t *mc __attribute__((unused)),
+                                      omcache_value_t *result, void *context)
+{
+  size_t *values_found_p = (size_t *) context;
+  if (result->status == OMCACHE_OK &&
+      result->key_len >= sizeof("test_response_callback_") &&
+      memcmp(result->key, "test_response_callback_", sizeof("test_response_callback_") - 1) == 0)
+    {
+      *values_found_p = (*values_found_p) + 1;
+    }
+}
+
+START_TEST(test_response_callback)
+{
+  char *keys[64];
+  size_t key_lens[64];
+  size_t values_found = 0;
+  omcache_t *oc = ot_init_omcache(1, LOG_INFO);
+  ck_omcache_ok(omcache_set_response_callback(oc, test_response_callback_cb, &values_found));
+  for (int i = 0; i < 64; i ++)
+    {
+      key_lens[i] = asprintf(&keys[i], "test_response_callback_%d", i);
+      // only set half of the keys
+      if (i % 2)
+        continue;
+      ck_omcache(OMCACHE_BUFFERED,
+        omcache_set(oc, (cuc *) keys[i], key_lens[i], (cuc *) keys[i], key_lens[i], 0, 0, 0, 0));
+    }
+  ck_omcache_ok(omcache_set_buffering(oc, false));
+  ck_omcache_ok(omcache_io(oc, NULL, NULL, NULL, NULL, 5000));
+
+  // no even keys should be set
+  omcache_req_t reqs[64];
+  size_t req_count = 64;
+  ck_omcache_ok(omcache_get_multi(oc, (cuc **) keys, key_lens, 64, reqs, &req_count, NULL, NULL, 5000));
+  while (req_count > 0)
+    ck_omcache_ok(omcache_io(oc, reqs, &req_count, NULL, NULL, 5000));
+  ck_assert_int_eq(values_found, 32);
+  for (int i = 0; i < 64; i ++)
+    free(keys[i]);
+}
+END_TEST
+
 Suite *ot_suite_commands(void)
 {
   Suite *s = suite_create("Commands");
@@ -213,6 +361,9 @@ Suite *ot_suite_commands(void)
   tcase_add_test(tc_core, test_cas_and_flags);
   tcase_add_test(tc_core, test_add_and_replace);
   tcase_add_test(tc_core, test_increment_and_decrement);
+  tcase_add_test(tc_core, test_req_id_wraparound);
+  tcase_add_test(tc_core, test_buffering);
+  tcase_add_test(tc_core, test_response_callback);
   suite_add_tcase(s, tc_core);
 
   return s;

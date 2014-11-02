@@ -1,5 +1,5 @@
 TEST = test_omcache
-OBJS = test_omcache.o test_commands.o test_failures.o test_servers.o
+OBJS = test_omcache.o test_commands.o test_failures.o test_misc.o test_servers.o
 CPPFLAGS ?= -Wall -Wextra
 CFLAGS ?= -g -O2
 
@@ -9,7 +9,7 @@ check: $(TEST) ../libomcache.so
 	LD_LIBRARY_PATH=.. ./$<
 
 $(TEST): $(OBJS) ../libomcache.so
-	$(CC) $^ -o $@ -lcheck -L.. -lomcache
+	$(CC) $(LDFLAGS) $^ -o $@ -lcheck -L.. -lomcache
 
 ../libomcache.so:
 	$(MAKE) -C ..

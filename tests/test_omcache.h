@@ -51,12 +51,14 @@ int64_t ot_msec(void);
 
 Suite *ot_suite_commands(void);
 Suite *ot_suite_failures(void);
+Suite *ot_suite_misc(void);
 Suite *ot_suite_servers(void);
 
 typedef Suite *(suite_init_cb)(void);
 static suite_init_cb *const suites[] = {
   ot_suite_commands,
   ot_suite_failures,
+  ot_suite_misc,
   ot_suite_servers,
   };
 
