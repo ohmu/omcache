@@ -241,7 +241,9 @@ int omcache_get(omcache_t *mc,
   omcache_req_t req;
   omcache_value_t value;
   size_t req_count = 1, value_count = valuep ? 1 : 0;
-  int ret = omcache_get_multi(mc, &key, &key_len, 1, &req, &req_count, &value, &value_count, timeout_msec);
+  int ret = omcache_get_multi(mc, &key, &key_len, 1, &req, &req_count,
+                              valuep ? &value : NULL, valuep ? &value_count : NULL,
+                              timeout_msec);
   if (value_count == 0 && ret == OMCACHE_OK)
     ret = OMCACHE_NOT_FOUND;
   if (valuep)

@@ -249,29 +249,22 @@ static inline int64_t omc_msec()
   return ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 }
 
-static omc_srv_t *omc_srv_init(const char *hostname, int port)
+static omc_srv_t *omc_srv_init(const char *hostname)
 {
   omc_srv_t *srv = calloc(1, sizeof(*srv));
   srv->sock = -1;
   srv->list_index = -1;
-  if (port == -1)
+  // get port from hostname or default to MC_PORT
+  const char *p = strchr(hostname, ':');
+  if (p != NULL)
     {
-      const char *p = strchr(hostname, ':');
-      if (p != NULL)
-        {
-          srv->hostname = strndup(hostname, p - hostname);
-          srv->port = strdup(p + 1);
-        }
-      else
-        {
-          srv->hostname = strdup(hostname);
-          srv->port = strdup(MC_PORT);
-        }
+      srv->hostname = strndup(hostname, p - hostname);
+      srv->port = strdup(p + 1);
     }
   else
     {
       srv->hostname = strdup(hostname);
-      asprintf(&srv->port, "%d", port);
+      srv->port = strdup(MC_PORT);
     }
   return srv;
 }
@@ -331,7 +324,7 @@ int omcache_set_servers(omcache_t *mc, const char *servers)
           srv_new_size += 16;
           srv_new = realloc(srv_new, sizeof(*srv_new) * srv_new_size);
         }
-      srv_new[srv_new_count++] = omc_srv_init(srv, -1);
+      srv_new[srv_new_count++] = omc_srv_init(srv);
     }
   free(srv_dup);
 
@@ -957,17 +950,18 @@ static int omc_srv_read(omcache_t *mc, omc_srv_t *srv, omc_resp_lookup_t *rlooku
           hdr->response.opaque >= rlookup->req_id_min &&
           hdr->response.opaque <= rlookup->req_id_max)
         {
-          if (rlookup->values_size <= rlookup->values_returned)
-            {
-              omc_srv_log(LOG_WARNING, srv,
-                          "got expected packet %u but no room for it in "
-                          "response buffer of %zu entries, dropping response",
-                          hdr->response.opaque, rlookup->values_size);
-              continue;
-            }
-          omc_srv_debug(srv, "got expected packet %u (%u / %u)",
+          omc_srv_debug(srv, "got expected response %u (%u / %u)",
                         hdr->response.opaque, hdr->response.opaque - rlookup->req_id_min,
                         rlookup->req_id_max - rlookup->req_id_min + 1);
+          if (rlookup->values_size <= rlookup->values_returned)
+            {
+              if (rlookup->values_size)
+                omc_srv_log(LOG_WARNING, srv,
+                            "no space to store response %u "
+                            "in a buffer of %zu entries, dropping response",
+                            hdr->response.opaque, rlookup->values_size);
+              continue;
+            }
           rlookup->values[rlookup->values_returned++] = value;
           // don't overwrite the buffer to avoid overwriting the response
           keep_buffers = true;
@@ -1050,25 +1044,19 @@ int omcache_io(omcache_t *mc,
   int64_t timeout_abs = (timeout_msec > 0) ? now + timeout_msec : - 1;
   omc_resp_lookup_t rlookup = {0};
 
-  if (reqs && req_count && *req_count && values && value_count && *value_count)
+  if (reqs && req_count && *req_count)
     {
       rlookup.values = values;
-      rlookup.values_size = *value_count;
+      rlookup.values_size = value_count ? *value_count : 0;
       rlookup.req_id_min = reqs[0].header.opaque;
       rlookup.req_id_max = reqs[*req_count - 1].header.opaque;
       if (rlookup.req_id_max - rlookup.req_id_min + 1 != *req_count)
         return OMCACHE_INVALID;
-      if (*value_count < *req_count)
+      if (value_count && *value_count < *req_count)
         return OMCACHE_INVALID;
-      *value_count = 0;
     }
-  else
-    {
-      if (req_count)
-        *req_count = 0;
-      if (value_count)
-        *value_count = 0;
-    }
+  if (value_count)
+    *value_count = 0;
 
   while (ret == OMCACHE_OK || ret == OMCACHE_AGAIN)
     {
@@ -1343,9 +1331,20 @@ int omcache_command_status(omcache_t *mc, omcache_req_t *req, int32_t timeout_ms
 {
   size_t req_count = 1, value_count = 1;
   omcache_value_t value = {0};
+  int req_srv_idx = req->server_index;
 
   int ret = omcache_command(mc, req, &req_count, &value, &value_count, timeout_msec);
-  return (ret == OMCACHE_OK && value_count) ? value.status : ret;
+  if (ret != OMCACHE_OK)
+    return ret;
+  if (value_count)
+    return value.status;
+  // is the server dead or did our response just disappear in thin air?
+  // note that in case the caller asked for a specific server we'll say that
+  // servers are not available, if we picked the server from our pool we'll
+  // say communication with one server failed
+  if (!mc->servers[req->server_index]->connected)
+    return req_srv_idx >= 0 ? OMCACHE_NO_SERVERS : OMCACHE_SERVER_FAILURE;
+  return OMCACHE_FAIL;
 }
 
 int omcache_command(omcache_t *mc,
