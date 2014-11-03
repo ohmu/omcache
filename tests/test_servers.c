@@ -91,6 +91,8 @@ START_TEST(test_invalid_servers)
   ck_omcache(omcache_noop(oc, 1, 2000), OMCACHE_NO_SERVERS);
   ck_omcache(omcache_noop(oc, 1, 2000), OMCACHE_NO_SERVERS);
   ck_omcache(omcache_get(oc, (cuc *) "foo", 3, NULL, NULL, NULL, NULL, 2000), OMCACHE_NO_SERVERS);
+
+  omcache_free(oc);
 }
 END_TEST
 
@@ -106,6 +108,8 @@ START_TEST(test_multiple_times_same_server)
   ck_omcache(omcache_get(oc, (cuc *) "foo", 3, NULL, NULL, NULL, NULL, 2000), OMCACHE_NOT_FOUND);
   for (int i = 0; i < 20; i++)
     ck_omcache_ok(omcache_noop(oc, i, 1000));
+
+  omcache_free(oc);
 }
 END_TEST
 

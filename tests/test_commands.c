@@ -249,6 +249,8 @@ START_TEST(test_req_id_wraparound)
   ck_assert_uint_le(oc_s->req_id, pre_wrap_req_id);
   for (int i = 0; i < 1000; i ++)
     free(keys[i]);
+
+  omcache_free(oc);
 }
 END_TEST
 
@@ -303,6 +305,8 @@ START_TEST(test_buffering)
   ck_omcache_ok(omcache_stat(oc, "", values, &value_count, 0, 5000));
   for (int i = 0; i < 1000; i ++)
     free(keys[i]);
+
+  omcache_free(oc);
 }
 END_TEST
 
@@ -346,6 +350,8 @@ START_TEST(test_response_callback)
   ck_assert_int_eq(values_found, 32);
   for (int i = 0; i < 64; i ++)
     free(keys[i]);
+
+  omcache_free(oc);
 }
 END_TEST
 

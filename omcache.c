@@ -184,6 +184,7 @@ int omcache_free(omcache_t *mc)
       memset(mc->servers, 'L', mc->server_count * sizeof(void *));
       free(mc->servers);
     }
+  free(mc->server_polls);
   free(mc->ketama);
   free(mc->fd_map);
   memset(mc, 'M', sizeof(*mc));
@@ -282,6 +283,8 @@ static int omc_srv_free(omcache_t *mc, omc_srv_t *srv)
     freeaddrinfo(srv->addrs);
   free(srv->send_buffer.base);
   free(srv->recv_buffer.base);
+  free(srv->hostname);
+  free(srv->port);
   memset(srv, 'S', sizeof(*srv));
   free(srv);
   return OMCACHE_OK;
