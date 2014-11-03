@@ -658,6 +658,7 @@ static int omc_srv_connect(omcache_t *mc, omc_srv_t *srv)
           if (srv->addrs)
             {
               freeaddrinfo(srv->addrs);
+              srv->addrs = NULL;
             }
           struct addrinfo hints;
           memset(&hints, 0, sizeof(hints));
@@ -673,7 +674,6 @@ static int omc_srv_connect(omcache_t *mc, omc_srv_t *srv)
             {
               omc_srv_log(LOG_WARNING, srv, "getaddrinfo: %s", gai_strerror(err));
               omc_srv_reset(mc, srv, "getaddrinfo failed");
-              srv->addrs = NULL;
               omc_srv_disable(mc, srv);
               return OMCACHE_SERVER_FAILURE;
             }

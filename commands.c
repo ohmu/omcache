@@ -22,13 +22,13 @@
 
 int omcache_noop(omcache_t *mc, int server_index, int32_t timeout_msec)
 {
-  omcache_req_t req = {
+  omcache_req_t req[1] = {{
     .server_index = server_index,
     .header = {
       .opcode = PROTOCOL_BINARY_CMD_NOOP,
       },
-    };
-  return omcache_command_status(mc, &req, timeout_msec);
+    }};
+  return omcache_command_status(mc, req, timeout_msec);
 }
 
 int omcache_stat(omcache_t *mc, const char *command,
@@ -37,7 +37,7 @@ int omcache_stat(omcache_t *mc, const char *command,
 {
   size_t key_len = command ? strlen(command) : 0;
   size_t req_count = 1;
-  omcache_req_t req = {
+  omcache_req_t req[1] = {{
     .server_index = server_index,
     .header = {
       .opcode = PROTOCOL_BINARY_CMD_STAT,
@@ -45,14 +45,14 @@ int omcache_stat(omcache_t *mc, const char *command,
       .bodylen = htobe32(key_len),
       },
     .key = (const unsigned char *) command,
-    };
-  return omcache_command(mc, &req, &req_count, values, value_count, timeout_msec);
+    }};
+  return omcache_command(mc, req, &req_count, values, value_count, timeout_msec);
 }
 
 int omcache_flush_all(omcache_t *mc, time_t expiration, int server_index, int32_t timeout_msec)
 {
   uint32_t body_exp = htobe32(expiration);
-  omcache_req_t req = {
+  omcache_req_t req[1] = {{
     .server_index = server_index,
     .header = {
       .opcode = PROTOCOL_BINARY_CMD_FLUSH,
@@ -60,8 +60,8 @@ int omcache_flush_all(omcache_t *mc, time_t expiration, int server_index, int32_
       .bodylen = htobe32(sizeof(body_exp)),
       },
     .extra = &body_exp,
-    };
-  return omcache_command_status(mc, &req, timeout_msec);
+    }};
+  return omcache_command_status(mc, req, timeout_msec);
 }
 
 struct protocol_binary_set_request_body_s {
@@ -79,7 +79,7 @@ static int omc_set_cmd(omcache_t *mc, protocol_binary_command opcode,
     .flags = htobe32(flags),
     .expiration = htobe32(expiration),
     };
-  omcache_req_t req = {
+  omcache_req_t req[1] = {{
     .server_index = -1,
     .header = {
       .opcode = opcode,
@@ -91,8 +91,8 @@ static int omc_set_cmd(omcache_t *mc, protocol_binary_command opcode,
     .extra = &body,
     .key = key,
     .data = value,
-    };
-  return omcache_command_status(mc, &req, timeout_msec);
+    }};
+  return omcache_command_status(mc, req, timeout_msec);
 }
 
 int omcache_set(omcache_t *mc,
@@ -145,7 +145,7 @@ static int omc_ctr_cmd(omcache_t *mc, protocol_binary_command opcode,
     .initial = htobe64(initial),
     .expiration = htobe32(expiration),
     };
-  omcache_req_t req = {
+  omcache_req_t req[1] = {{
     .server_index = -1,
     .header = {
       .opcode = opcode,
@@ -155,10 +155,10 @@ static int omc_ctr_cmd(omcache_t *mc, protocol_binary_command opcode,
       },
     .extra = &body,
     .key = key,
-    };
+    }};
   omcache_value_t value = {0};
   size_t req_count = 1, value_count = 1;
-  int ret = omcache_command(mc, &req, &req_count, &value, &value_count, timeout_msec);
+  int ret = omcache_command(mc, req, &req_count, &value, &value_count, timeout_msec);
   if (ret == OMCACHE_OK && value_count)
     ret = value.status;
   if (valuep)
@@ -192,7 +192,7 @@ int omcache_delete(omcache_t *mc,
                    const unsigned char *key, size_t key_len,
                    int32_t timeout_msec)
 {
-  omcache_req_t req = {
+  omcache_req_t req[1] = {{
     .server_index = -1,
     .header = {
       .opcode = QCMD(PROTOCOL_BINARY_CMD_DELETE),
@@ -200,8 +200,8 @@ int omcache_delete(omcache_t *mc,
       .bodylen = htobe32(key_len),
       },
     .key = key,
-    };
-  return omcache_command_status(mc, &req, timeout_msec);
+    }};
+  return omcache_command_status(mc, req, timeout_msec);
 }
 
 int omcache_get_multi(omcache_t *mc,
@@ -239,7 +239,7 @@ int omcache_get(omcache_t *mc,
                 int32_t timeout_msec)
 {
   omcache_req_t req;
-  omcache_value_t value;
+  omcache_value_t value = {0};
   size_t req_count = 1, value_count = valuep ? 1 : 0;
   int ret = omcache_get_multi(mc, &key, &key_len, 1, &req, &req_count,
                               valuep ? &value : NULL, valuep ? &value_count : NULL,
