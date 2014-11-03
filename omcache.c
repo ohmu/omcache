@@ -252,18 +252,28 @@ static inline int64_t omc_msec()
 
 static omc_srv_t *omc_srv_init(const char *hostname)
 {
+  const char *p;
   omc_srv_t *srv = calloc(1, sizeof(*srv));
   srv->sock = -1;
   srv->list_index = -1;
-  // get port from hostname or default to MC_PORT
-  const char *p = strchr(hostname, ':');
-  if (p != NULL)
+  if (*hostname == '[' && (p = strchr(hostname, ']')) != NULL)
     {
+      // handle [addr]:port form
+      srv->hostname = strndup(hostname + 1, p - (hostname + 1));
+      if (*(p + 1) == ':')
+        srv->port = strdup(p + 2);
+      else
+        srv->port = strdup(MC_PORT);
+    }
+  else if ((p = strchr(hostname, ':')) != NULL)
+    {
+      // handle hostname:port form
       srv->hostname = strndup(hostname, p - hostname);
       srv->port = strdup(p + 1);
     }
   else
     {
+      // just use hostname as-is and default MC port
       srv->hostname = strdup(hostname);
       srv->port = strdup(MC_PORT);
     }

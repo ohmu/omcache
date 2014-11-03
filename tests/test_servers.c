@@ -113,6 +113,35 @@ START_TEST(test_multiple_times_same_server)
 }
 END_TEST
 
+START_TEST(test_ipv6)
+{
+  // NOTE: memcached doesn't support specifying a literal IPv6 address on
+  // the commandline, so we try to use 'localhost6' if we can find it in
+  // /etc/hosts
+  char linebuf[300];
+  bool have_localhost6 = false;
+  FILE *fp = fopen("/etc/hosts", "r");
+  if (fp == NULL)
+    return;
+  while (!have_localhost6)
+    {
+      if (fgets(linebuf, sizeof(linebuf), fp) == NULL)
+        break;
+      if (strstr(linebuf, "localhost6") != NULL)
+        have_localhost6 = true;
+    }
+  fclose(fp);
+  if (!have_localhost6)
+    return;
+  omcache_t *oc = ot_init_omcache(0, LOG_DEBUG);
+  int mc_port = ot_start_memcached("localhost6", NULL);
+  sprintf(linebuf, "[::1]:%d", mc_port);
+  ck_omcache_ok(omcache_set_servers(oc, linebuf));
+  ck_omcache_ok(omcache_noop(oc, 0, 1000));
+  omcache_free(oc);
+}
+END_TEST
+
 Suite *ot_suite_servers(void)
 {
   Suite *s = suite_create("Servers");
@@ -122,6 +151,7 @@ Suite *ot_suite_servers(void)
   tcase_add_test(tc_core, test_no_servers);
   tcase_add_test(tc_core, test_invalid_servers);
   tcase_add_test(tc_core, test_multiple_times_same_server);
+  tcase_add_test(tc_core, test_ipv6);
   suite_add_tcase(s, tc_core);
 
   return s;
