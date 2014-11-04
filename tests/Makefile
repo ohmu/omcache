@@ -6,7 +6,7 @@ CFLAGS ?= -g -O2
 all: $(TEST)
 
 check: $(TEST) ../libomcache.so
-	LD_LIBRARY_PATH=.. ./$<
+	LD_LIBRARY_PATH=.. $(CHECKER) ./$<
 
 $(TEST): $(OBJS) ../libomcache.so
 	$(CC) $(LDFLAGS) $^ -o $@ -lcheck -L.. -lomcache

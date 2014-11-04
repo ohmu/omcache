@@ -60,3 +60,21 @@ clean:
 
 check:
 	$(MAKE) -C tests check
+
+check-sanitizer:
+	$(MAKE) clean
+	$(MAKE) CFLAGS="$(CFLAGS) -fsanitize=address,undefined" \
+		LDFLAGS="$(LDFLAGS) -fsanitize=address,undefined" \
+		-C tests check
+
+check-valgrind:
+	$(MAKE) clean
+	$(MAKE)
+	$(MAKE) -C tests check CHECKER="valgrind --leak-check=full"
+
+check-coverage:
+	$(MAKE) clean
+	$(MAKE) CFLAGS="$(CFLAGS) -fprofile-arcs -ftest-coverage" \
+		LDFLAGS="$(LDFLAGS) -fprofile-arcs -ftest-coverage"
+	$(MAKE) -C tests check
+	gcov -rb omcache.c commands.c
