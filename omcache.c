@@ -696,7 +696,21 @@ static int omc_srv_connect(omcache_t *mc, omc_srv_t *srv)
       while (srv->addrp)
         {
           int sock = socket(srv->addrp->ai_family, srv->addrp->ai_socktype, srv->addrp->ai_protocol);
-          fcntl(sock, F_SETFL, O_NONBLOCK);
+          if (sock < 0)
+            {
+              omc_srv_reset(mc, srv, "socket creation failed");
+            }
+          else if (fcntl(sock, F_SETFL, O_NONBLOCK) < 0)
+            {
+              omc_srv_reset(mc, srv, "fcntl(sock, F_SETFL, O_NONBLOCK)");
+              close(sock);
+              sock = -1;
+            }
+          if (sock < 0)
+            {
+              omc_srv_disable(mc, srv);
+              return OMCACHE_SERVER_FAILURE;
+            }
           if (sock >= mc->fd_map_max)
             {
               int old_max = mc->fd_map_max;

@@ -64,6 +64,7 @@ START_TEST(test_server_list)
       ck_assert_int_ge(hits[i], 200);
       ck_assert_int_le(hits[i], 300);
     }
+  ck_omcache_ok(omcache_set_servers(oc, ""));
   omcache_free(oc);
 }
 END_TEST
