@@ -830,6 +830,7 @@ static int omc_do_read(omcache_t *mc, omc_srv_t *srv, size_t msg_size, bool keep
 // if a response's 'opaque' matches req_id store that response in *resp.
 static int omc_srv_read(omcache_t *mc, omc_srv_t *srv, omc_resp_lookup_t *rlookup)
 {
+  protocol_binary_response_header stack_header;
   bool keep_buffers = false;
   int ret = OMCACHE_OK;
 
@@ -843,8 +844,6 @@ static int omc_srv_read(omcache_t *mc, omc_srv_t *srv, omc_resp_lookup_t *rlooku
         }
 
       omcache_value_t value = {0};
-      protocol_binary_response_header *hdr =
-        (protocol_binary_response_header *) srv->recv_buffer.r;
       size_t buffered = srv->recv_buffer.w - srv->recv_buffer.r;
       size_t msg_size = sizeof(protocol_binary_response_header);
       if (buffered < msg_size)
@@ -852,6 +851,14 @@ static int omc_srv_read(omcache_t *mc, omc_srv_t *srv, omc_resp_lookup_t *rlooku
           omc_srv_debug(srv, "msg %d: not enough data in buffer (%zd, need %zd)",
                         i, buffered, msg_size);
           break;
+        }
+      protocol_binary_response_header *hdr =
+        (protocol_binary_response_header *) srv->recv_buffer.r;
+      // make sure the message is properly aligned
+      if (((unsigned long) (void *) hdr) % 8)
+        {
+          memcpy(&stack_header, srv->recv_buffer.r, msg_size);
+          hdr = &stack_header;
         }
       if (hdr->response.magic != PROTOCOL_BINARY_RES)
         {
@@ -935,9 +942,12 @@ static int omc_srv_read(omcache_t *mc, omc_srv_t *srv, omc_resp_lookup_t *rlooku
           hdr->response.opcode == PROTOCOL_BINARY_CMD_GETK ||
           hdr->response.opcode == PROTOCOL_BINARY_CMD_GETKQ)
         {
-          protocol_binary_response_get *gethdr =
-            (protocol_binary_response_get *) srv->recv_buffer.r;
-          value.flags = be32toh(gethdr->message.body.flags);
+          // don't cast recv_buffer to protocol_binary_response_header as
+          // that'd require us to realign it properly and in practice we'll
+          // be swapping bytes anyway so may as well do it manually
+          const unsigned char *b = srv->recv_buffer.r + sizeof(*hdr);
+          memcpy(&value.flags, b, 4);
+          value.flags = be32toh(value.flags);
         }
 
       if (hdr->response.opcode == PROTOCOL_BINARY_CMD_INCREMENT ||
@@ -945,9 +955,9 @@ static int omc_srv_read(omcache_t *mc, omc_srv_t *srv, omc_resp_lookup_t *rlooku
           hdr->response.opcode == PROTOCOL_BINARY_CMD_INCREMENTQ ||
           hdr->response.opcode == PROTOCOL_BINARY_CMD_DECREMENTQ)
         {
-          protocol_binary_response_incr *incrhdr =
-            (protocol_binary_response_incr *) srv->recv_buffer.r;
-          value.delta_value = be64toh(incrhdr->message.body.value);
+          const unsigned char *b = srv->recv_buffer.r + sizeof(*hdr);
+          memcpy(&value.delta_value, b, 8);
+          value.delta_value = be64toh(value.delta_value);
         }
 
       srv->recv_buffer.r += msg_size;
@@ -1370,6 +1380,16 @@ int omcache_command(omcache_t *mc,
   size_t req_count = *req_countp;
   *req_countp = 0;
 
+  if (mc->server_count == 0)
+    ret = OMCACHE_NO_SERVERS;
+
+  if (ret != OMCACHE_OK || req_count == 0)
+    {
+      if (value_count)
+        *value_count = 0;
+      return ret;
+    }
+
   struct rpsbucket_s
   {
     omcache_req_t *reqs;
@@ -1378,11 +1398,7 @@ int omcache_command(omcache_t *mc,
   } reqs_per_server[mc->server_count];
   memset(reqs_per_server, 0, sizeof(reqs_per_server));
 
-  if (mc->server_count == 0)
-    {
-      ret = OMCACHE_NO_SERVERS;
-    }
-  else if (mc->server_count == 1)
+  if (mc->server_count == 1)
     {
       reqs_per_server[0].reqs = reqs;
       reqs_per_server[0].count = req_count;
