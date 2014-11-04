@@ -95,10 +95,124 @@ START_TEST(test_suspended_memcache)
 }
 END_TEST
 
+START_TEST(test_all_backends_fail)
+{
+  size_t item_count = 10;
+  const unsigned char keydata[] =
+    "342f48a2c3a152a0fe39df4f2bca34d3c6c56e57797f0da682a6154ef7b674e3"
+    "9c131c0c70442f94b865a5e0e030b48f4f51969fb80d5251fd67023c9982d3ab"
+    "1ffd27717200ccb3c92882b10a04129422d5b71ddfaf24daf9fb5ee9cdfa2ef0";
+  size_t val_len;
+  const unsigned char *val;
+  pid_t mc_pid0, mc_pid1;
+  int mc_port0 = ot_start_memcached(NULL, &mc_pid0);
+  int mc_port1 = ot_start_memcached(NULL, &mc_pid1);
+  char strbuf[100];
+  sprintf(strbuf, "127.0.0.1:%d,127.0.0.1:%d", mc_port0, mc_port1);
+
+  omcache_t *oc = ot_init_omcache(0, LOG_INFO);
+  ck_omcache_ok(omcache_set_servers(oc, strbuf));
+  ck_omcache_ok(omcache_set_dead_timeout(oc, 1000));
+  ck_omcache_ok(omcache_set_connect_timeout(oc, 2000));
+  ck_omcache_ok(omcache_set_reconnect_timeout(oc, 3000));
+
+  // send noops to both servers and write a bunch of values to them to make
+  // sure we're connected to both servers and ketama picks both servers
+  ck_omcache_ok(omcache_noop(oc, 0, 1000));
+  ck_omcache_ok(omcache_noop(oc, 1, 1000));
+
+  for (size_t i = 0; i < item_count; i ++)
+    ck_omcache_ok(omcache_set(oc, keydata + i, 100, keydata + i, 100, 0, 0, 0, 0));
+  ck_omcache_ok(omcache_io(oc, NULL, NULL, NULL, NULL, 5000));
+  for (size_t i = 0; i < item_count; i ++)
+    {
+      ck_omcache_ok(omcache_get(oc, keydata + i, 100, &val, &val_len, NULL, NULL, 3000));
+      ck_assert_uint_eq(val_len, 100);
+      ck_assert_int_eq(memcmp(val, keydata + i, 100), 0);
+    }
+
+  // suspend memcaches
+  kill(mc_pid0, SIGSTOP);
+  kill(mc_pid1, SIGSTOP);
+  usleep(100000);  // allow 0.1 for SIGSTOPs to be delivered
+
+  // now try to read the values
+  for (size_t i = 0; i < item_count; i ++)
+    {
+      int ret = omcache_get(oc, keydata + i, 100, &val, &val_len, NULL, NULL, 3000);
+      ck_assert_int_ne(ret, OMCACHE_OK);
+    }
+
+  // sleep over timeouts again and try again
+  sleep(3);
+
+  // resume one memcache
+  kill(mc_pid0, SIGCONT);
+
+  // now try to read the values again, some of these will fail because we're
+  // not yet fully connected to mc_pid0 and mc_pid1 is still down
+  size_t found = 0;
+  for (size_t i = 0; i < item_count; i ++)
+    {
+      int ret = omcache_get(oc, keydata + i, 100, &val, &val_len, NULL, NULL, 3000);
+      if (ret == OMCACHE_OK)
+        {
+          ck_assert_uint_eq(val_len, 100);
+          ck_assert_int_eq(memcmp(val, keydata + i, 100), 0);
+          found ++;
+        }
+      else
+        {
+          usleep(1000);
+        }
+    }
+  ck_assert_uint_ge(found, 1);  // we should've found something
+
+  // resume the other memcache
+  kill(mc_pid1, SIGCONT);
+
+  // sleep over timeouts again
+  sleep(3);
+
+  // try to read the values yet again, some of these will fail because we're
+  // not yet fully connected after resuming mc_pid1
+  found = 0;
+  for (size_t i = 0; i < item_count; i ++)
+    {
+      int ret = omcache_get(oc, keydata + i, 100, &val, &val_len, NULL, NULL, 3000);
+      if (ret == OMCACHE_OK)
+        {
+          ck_assert_uint_eq(val_len, 100);
+          ck_assert_int_eq(memcmp(val, keydata + i, 100), 0);
+          found ++;
+        }
+      else
+        {
+          usleep(1000);
+        }
+    }
+  ck_assert_uint_ge(found, item_count / 2 + 1);  // we should've found more than half
+
+  // sleep over timeouts again
+  sleep(3);
+
+  // try to read the values a final time, now we should have everything
+  for (size_t i = 0; i < item_count; i ++)
+    {
+      ck_omcache_ok(omcache_get(oc, keydata + i, 100, &val, &val_len, NULL, NULL, 3000));
+      ck_assert_uint_eq(val_len, 100);
+      ck_assert_int_eq(memcmp(val, keydata + i, 100), 0);
+    }
+
+  omcache_free(oc);
+}
+END_TEST
+
 Suite *ot_suite_failures(void)
 {
   Suite *s = suite_create("Failures");
   tcase_set_timeout(ot_tcase_add(s, test_suspended_memcache), 60);
+  tcase_set_timeout(ot_tcase_add(s, test_all_backends_fail), 60);
 
   return s;
 }

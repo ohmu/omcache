@@ -142,6 +142,7 @@ typedef struct omc_resp_lookup_s
 
 static int omc_srv_free(omcache_t *mc, omc_srv_t *srv);
 static int omc_srv_connect(omcache_t *mc, omc_srv_t *srv);
+static int omc_srv_io(omcache_t *mc, omc_srv_t *srv, omc_resp_lookup_t *rlookup);
 static void omc_srv_reset(omcache_t *mc, omc_srv_t *srv, const char *log_msg);
 static int omc_srv_send_noop(omcache_t *mc, omc_srv_t *srv, bool init);
 static omc_ketama_t *omc_ketama_create(omcache_t *mc);
@@ -580,12 +581,17 @@ static int omc_ketama_lookup(omcache_t *mc, const unsigned char *key, size_t key
         {
           // try to bring disabled servers back online but don't select them
           // yet as we need to (asynchronously) verify that they're usable
-          if (selected->srv->sock == -1 && selected->srv->disabled)
+          if (selected->srv->disabled)
             {
               if (now == 0)
                 now = omc_msec();
-              if (now > selected->srv->retry_at)
-                omc_srv_connect(mc, selected->srv);
+              // only attempt io with servers once per millisecond (or once
+              // per API call) unless there's some progress in the connection
+              if (now > selected->srv->retry_at &&
+                  max(now, selected->srv->last_io_success + 1) > selected->srv->last_io_attempt)
+                {
+                  omc_srv_io(mc, selected->srv, NULL);
+                }
             }
           skipped ++;
           continue;
@@ -936,7 +942,11 @@ static int omc_srv_read(omcache_t *mc, omc_srv_t *srv, omc_resp_lookup_t *rlooku
             {
               // a connection setup noop message, mark server alive and don't process this further.
               srv->expected_noop = 0;
-              srv->disabled = false;
+              if (srv->disabled)
+                {
+                  omc_srv_log(LOG_INFO, srv, "%s", "re-enabling server");
+                  srv->disabled = false;
+                }
               srv->recv_buffer.r += msg_size;
               omc_srv_debug(srv, "%s", "received expected noop packet");
               continue;
@@ -1037,6 +1047,12 @@ static int omc_srv_io(omcache_t *mc, omc_srv_t *srv, omc_resp_lookup_t *rlookup)
         {
           if (errno != EINTR && errno != EAGAIN)
             omc_srv_reset(mc, srv, "write failed");
+          // if write to a disabled server (ie on reconnect) would block and
+          // we haven't been able to write for dead_timeout msec we'll kill
+          // the connection and disable the server for a while more
+          if (errno == EAGAIN && srv->disabled &&
+              srv->last_io_attempt - srv->last_io_success >= mc->dead_timeout_msec)
+            omc_srv_reset(mc, srv, "write timed out");
           return OMCACHE_SERVER_FAILURE;
         }
       omc_srv_debug(srv, "write %zd bytes of %zd bytes %s",
@@ -1371,10 +1387,10 @@ int omcache_command_status(omcache_t *mc, omcache_req_t *req, int32_t timeout_ms
   int req_srv_idx = req->server_index;
 
   int ret = omcache_command(mc, req, &req_count, &value, &value_count, timeout_msec);
-  if (ret != OMCACHE_OK)
-    return ret;
   if (value_count)
     return value.status;
+  if (ret != OMCACHE_OK || timeout_msec == 0)
+    return ret;
   // is the server dead or did our response just disappear in thin air?
   // note that in case the caller asked for a specific server we'll say that
   // servers are not available, if we picked the server from our pool we'll
