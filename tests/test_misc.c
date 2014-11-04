@@ -42,10 +42,6 @@ END_TEST
 Suite *ot_suite_misc(void)
 {
   Suite *s = suite_create("Misc");
-  TCase *tc_core = tcase_create("OMcache");
-
-  tcase_add_test(tc_core, test_strerror);
-  suite_add_tcase(s, tc_core);
-
+  ot_tcase_add(s, test_strerror);
   return s;
 }

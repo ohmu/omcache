@@ -41,6 +41,12 @@
 
 #define ck_omcache_ok(c) ck_omcache((c), OMCACHE_OK)
 
+#define ot_tcase_add(s,f) \
+  ({  TCase *tc_ = tcase_create(#f); \
+      tcase_add_test(tc_, f); \
+      suite_add_tcase((s), tc_); \
+      tc_; })
+
 typedef const unsigned char cuc;
 
 omcache_t *ot_init_omcache(int server_count, int log_level);

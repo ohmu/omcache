@@ -358,19 +358,17 @@ END_TEST
 Suite *ot_suite_commands(void)
 {
   Suite *s = suite_create("Commands");
-  TCase *tc_core = tcase_create("OMcache");
 
-  tcase_add_test(tc_core, test_noop);
-  tcase_add_test(tc_core, test_stats);
-  tcase_add_test(tc_core, test_flush_all);
-  tcase_add_test(tc_core, test_set_get_delete);
-  tcase_add_test(tc_core, test_cas_and_flags);
-  tcase_add_test(tc_core, test_add_and_replace);
-  tcase_add_test(tc_core, test_increment_and_decrement);
-  tcase_add_test(tc_core, test_req_id_wraparound);
-  tcase_add_test(tc_core, test_buffering);
-  tcase_add_test(tc_core, test_response_callback);
-  suite_add_tcase(s, tc_core);
+  ot_tcase_add(s, test_noop);
+  ot_tcase_add(s, test_stats);
+  ot_tcase_add(s, test_flush_all);
+  ot_tcase_add(s, test_set_get_delete);
+  ot_tcase_add(s, test_cas_and_flags);
+  ot_tcase_add(s, test_add_and_replace);
+  ot_tcase_add(s, test_increment_and_decrement);
+  ot_tcase_add(s, test_req_id_wraparound);
+  ot_tcase_add(s, test_buffering);
+  ot_tcase_add(s, test_response_callback);
 
   return s;
 }

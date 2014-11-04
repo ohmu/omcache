@@ -98,11 +98,7 @@ END_TEST
 Suite *ot_suite_failures(void)
 {
   Suite *s = suite_create("Failures");
-  TCase *tc_core = tcase_create("OMcache");
-
-  tcase_add_test(tc_core, test_suspended_memcache);
-  tcase_set_timeout(tc_core, 60);
-  suite_add_tcase(s, tc_core);
+  tcase_set_timeout(ot_tcase_add(s, test_suspended_memcache), 60);
 
   return s;
 }

@@ -146,14 +146,12 @@ END_TEST
 Suite *ot_suite_servers(void)
 {
   Suite *s = suite_create("Servers");
-  TCase *tc_core = tcase_create("OMcache");
 
-  tcase_add_test(tc_core, test_server_list);
-  tcase_add_test(tc_core, test_no_servers);
-  tcase_add_test(tc_core, test_invalid_servers);
-  tcase_add_test(tc_core, test_multiple_times_same_server);
-  tcase_add_test(tc_core, test_ipv6);
-  suite_add_tcase(s, tc_core);
+  ot_tcase_add(s, test_server_list);
+  ot_tcase_add(s, test_no_servers);
+  ot_tcase_add(s, test_invalid_servers);
+  ot_tcase_add(s, test_multiple_times_same_server);
+  ot_tcase_add(s, test_ipv6);
 
   return s;
 }
