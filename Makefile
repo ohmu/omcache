@@ -8,7 +8,7 @@ INCLUDEDIR ?= $(PREFIX)/include
 STLIB_A = libomcache.a
 SHLIB_SO = libomcache.so
 SHLIB_V = $(SHLIB_SO).0
-OBJ = omcache.o commands.o
+OBJ = omcache.o commands.o md5.o
 CPPFLAGS ?= -Wall -Wextra
 CFLAGS ?= -g -O2
 
@@ -75,6 +75,6 @@ check-valgrind:
 check-coverage:
 	$(MAKE) clean
 	$(MAKE) CFLAGS="$(CFLAGS) -fprofile-arcs -ftest-coverage" \
-		LDFLAGS="$(LDFLAGS) -fprofile-arcs -ftest-coverage"
-	$(MAKE) -C tests check
-	gcov -rb omcache.c commands.c
+		LDFLAGS="$(LDFLAGS) -fprofile-arcs -ftest-coverage" \
+		-C tests check
+	gcov -rb omcache.c commands.c md5.c

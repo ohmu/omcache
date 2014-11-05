@@ -64,11 +64,15 @@ http://opensource.org/licenses/Apache-2.0 .
 Credits
 =======
 
-OMcache was created and is maintained by Oskari Saarenmaa <os@ohmu.fi>. 
+OMcache was created and is maintained by Oskari Saarenmaa <os@ohmu.fi>.
+
 F-Secure Corporation provided the infrastructure for testing OMcache in its
 initial development process and contributed to the pylibmc and libmemcached
 compatibility layers as well as ported pgmemcache (PostgreSQL memcached
 interface) to run on OMcache.
+
+MD5 implementation is based on Solar Designer's Public Domain / BSD licensed
+code from openwall.info.
 
 Contact
 =======

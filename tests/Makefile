@@ -14,10 +14,10 @@ all: $(TEST)
 check: $(TEST) ../libomcache.so
 	LD_LIBRARY_PATH=.. $(CHECKER) ./$<
 
-$(TEST): $(OBJS) ../libomcache.so
-	$(CC) $(LDFLAGS) $^ -o $@ -lcheck -L.. -lomcache
+$(TEST): $(OBJS) ../libomcache.a
+	$(CC) $(LDFLAGS) $^ -o $@ -lrt -lcheck
 
-../libomcache.so:
+../libomcache.a:
 	$(MAKE) -C ..
 
 %.o: %.c

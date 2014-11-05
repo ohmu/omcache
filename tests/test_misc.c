@@ -10,6 +10,7 @@
  */
 
 #include "test_omcache.h"
+#include "omcache_priv.h"
 
 START_TEST(test_strerror)
 {
@@ -39,9 +40,21 @@ START_TEST(test_strerror)
 }
 END_TEST
 
+START_TEST(test_md5)
+{
+  const char text[] = "TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION";
+  const unsigned char text_md5[] = { 0xb9, 0x83, 0x21, 0xf1, 0x53, 0x89,
+    0xf7, 0xd0, 0x4a, 0x1e, 0x9a, 0x8d, 0x41, 0x40, 0x3b, 0x3b };
+  unsigned char buf[16];
+  omc_hash_md5((unsigned char *) text, strlen(text), buf);
+  ck_assert_int_eq(memcmp(text_md5, buf, 16), 0);
+}
+END_TEST
+
 Suite *ot_suite_misc(void)
 {
   Suite *s = suite_create("Misc");
   ot_tcase_add(s, test_strerror);
+  ot_tcase_add(s, test_md5);
   return s;
 }
