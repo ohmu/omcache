@@ -50,8 +50,15 @@ START_TEST(test_server_list)
         }
       ck_omcache_ok(omcache_server_info_free(oc, sinfo));
     }
-  // check that we have a mostly even distribution
-  int hits[4] = {0};
+  ck_omcache_ok(omcache_set_servers(oc, ""));
+  omcache_free(oc);
+}
+END_TEST
+
+static void check_distribution(omcache_t *oc, int srvcnt)
+{
+  int hits[srvcnt];
+  memset(&hits, 0, sizeof(hits));
   for (int i = 0;  i < 1000; i ++)
     {
       int si = omcache_server_index_for_key(oc, (cuc *) &i, sizeof(i));
@@ -59,12 +66,24 @@ START_TEST(test_server_list)
       ck_assert_int_le(si, 3);
       hits[si] ++;
     }
-  for (int i = 0; i < 4; i++)
+  for (int i = 0; i < srvcnt; i++)
     {
       ck_assert_int_ge(hits[i], 200);
       ck_assert_int_le(hits[i], 300);
     }
-  ck_omcache_ok(omcache_set_servers(oc, ""));
+}
+
+START_TEST(test_distribution)
+{
+  // check that we have a mostly even distribution with all algorithms
+  omcache_t *oc = ot_init_omcache(0, LOG_INFO);
+  ck_omcache_ok(omcache_set_servers(oc, "127.0.0.1:1, 127.0.0.1:2, 127.0.0.1:3, 127.0.0.1:4"));
+  ck_omcache_ok(omcache_set_distribution_method(oc, &omcache_dist_libmemcached_ketama));
+  check_distribution(oc, 4);
+  ck_omcache_ok(omcache_set_distribution_method(oc, &omcache_dist_libmemcached_ketama_weighted));
+  check_distribution(oc, 4);
+  ck_omcache_ok(omcache_set_distribution_method(oc, &omcache_dist_libmemcached_ketama_pre1010));
+  check_distribution(oc, 4);
   omcache_free(oc);
 }
 END_TEST
@@ -148,6 +167,7 @@ Suite *ot_suite_servers(void)
   Suite *s = suite_create("Servers");
 
   ot_tcase_add(s, test_server_list);
+  ot_tcase_add(s, test_distribution);
   ot_tcase_add(s, test_no_servers);
   ot_tcase_add(s, test_invalid_servers);
   ot_tcase_add(s, test_multiple_times_same_server);

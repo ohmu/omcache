@@ -88,7 +88,8 @@ static void check_n_values(omcache_t *oc, memcached_st *mc,
     ck_assert_int_eq(libmemcached_values_found, key_count);
 }
 
-START_TEST(test_libmemcached_ketama_compatibility)
+static void test_libmemcached_ketama_compatibility_m(omcache_dist_t *omcache_method,
+                                                     memcached_behavior_t libmcd_method)
 {
   omcache_t *oc = ot_init_omcache(0, LOG_INFO);
   memcached_st *mc = memcached_create(NULL);
@@ -105,9 +106,10 @@ START_TEST(test_libmemcached_ketama_compatibility)
   ck_omcache_ok(omcache_set_servers(oc, srvbuf));
   ck_omcache_ok(omcache_set_dead_timeout(oc, 4000));
   ck_omcache_ok(omcache_set_reconnect_timeout(oc, 3000));
+  ck_omcache_ok(omcache_set_distribution_method(oc, omcache_method));
 
   ck_libmcd_ok(memcached_behavior_set(mc, MEMCACHED_BEHAVIOR_BINARY_PROTOCOL, 1));
-  ck_libmcd_ok(memcached_behavior_set(mc, MEMCACHED_BEHAVIOR_KETAMA, 1));
+  ck_libmcd_ok(memcached_behavior_set(mc, libmcd_method, 1));
   ck_libmcd_ok(memcached_behavior_set(mc, MEMCACHED_BEHAVIOR_DEAD_TIMEOUT, 4));
   ck_libmcd_ok(memcached_behavior_set(mc, MEMCACHED_BEHAVIOR_RETRY_TIMEOUT, 3));
   ck_libmcd_ok(memcached_server_add(mc, "127.0.0.1", mc_port0));
@@ -127,12 +129,31 @@ START_TEST(test_libmemcached_ketama_compatibility)
   omcache_free(oc);
   memcached_free(mc);
 }
+
+START_TEST(test_ketama_compatibility)
+{
+  // libmemcached doesn't provide a numeric version of the library, parse it
+  // here to try to figure out which distribution algorithm it's using
+  omcache_dist_t *dist = &omcache_dist_libmemcached_ketama;
+  int v = strncmp(memcached_lib_version(), "1.0.", 4);
+  if (v < 0 || (v == 0 && atoi(memcached_lib_version() + 4) < 10))
+    dist = &omcache_dist_libmemcached_ketama_pre1010;
+  test_libmemcached_ketama_compatibility_m(dist, MEMCACHED_BEHAVIOR_KETAMA);
+}
+END_TEST
+
+START_TEST(test_ketama_weighted_compatibility)
+{
+  test_libmemcached_ketama_compatibility_m(
+    &omcache_dist_libmemcached_ketama_weighted, MEMCACHED_BEHAVIOR_KETAMA_WEIGHTED);
+}
 END_TEST
 
 Suite *ot_suite_libmcd_compat(void)
 {
   Suite *s = suite_create("libmemcached compat");
-  tcase_set_timeout(ot_tcase_add(s, test_libmemcached_ketama_compatibility), 60);
+  tcase_set_timeout(ot_tcase_add(s, test_ketama_compatibility), 60);
+  tcase_set_timeout(ot_tcase_add(s, test_ketama_weighted_compatibility), 60);
   return s;
 }
 #endif // WITH_LIBMEMCACHED

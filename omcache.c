@@ -28,8 +28,6 @@
 
 #include "omcache_priv.h"
 
-#define MC_PORT "11211"
-
 #define max(a,b) ({__typeof__(a) a_ = (a), b_ = (b); a_ > b_ ? a_ : b_; })
 #define min(a,b) ({__typeof__(a) a_ = (a), b_ = (b); a_ < b_ ? a_ : b_; })
 
@@ -110,6 +108,7 @@ struct omcache_s
 
   // distribution
   omc_ketama_t *ketama;
+  omcache_dist_t *dist_method;
 
   // settings
   omcache_log_callback_func *log_cb;
@@ -167,6 +166,7 @@ omcache_t *omcache_init(void)
   mc->fd_map_max = 1024;
   mc->fd_map = malloc(mc->fd_map_max * sizeof(*mc->fd_map));
   memset(mc->fd_map, 0xff, mc->fd_map_max * sizeof(*mc->fd_map));
+  mc->dist_method = &omcache_dist_libmemcached_ketama;
   return mc;
 }
 
@@ -393,6 +393,15 @@ int omcache_set_servers(omcache_t *mc, const char *servers)
   return OMCACHE_OK;
 }
 
+int omcache_set_distribution_method(omcache_t *mc, omcache_dist_t *method)
+{
+  mc->dist_method = method;
+  // rerun distribution
+  free(mc->ketama);
+  mc->ketama = omc_ketama_create(mc);
+  return OMCACHE_OK;
+}
+
 int omcache_set_log_callback(omcache_t *mc, int level, omcache_log_callback_func *func, void *context)
 {
   mc->log_cb = func;
@@ -490,38 +499,6 @@ struct pollfd *omcache_poll_fds(omcache_t *mc, int *nfds, int *poll_timeout)
   return mc->server_polls;
 }
 
-static uint32_t omc_hash_jenkins_oat(const unsigned char *key, size_t key_len)
-{
-  // http://en.wikipedia.org/wiki/Jenkins_hash_function#one-at-a-time
-  uint32_t hash, i;
-  for (hash=i=0; i<key_len; i++)
-    {
-      hash += key[i];
-      hash += (hash << 10);
-      hash ^= (hash >> 6);
-    }
-  hash += (hash << 3);
-  hash ^= (hash >> 11);
-  hash += (hash << 15);
-  return hash;
-}
-
-static uint32_t omc_ketama_hash(const omc_srv_t *srv, uint32_t point)
-{
-  size_t hostname_len = strlen(srv->hostname), port_len = strlen(srv->port);
-  unsigned char name[hostname_len + port_len + 16], *namep;
-  namep = mempcpy(name, srv->hostname, hostname_len);
-  // libmemcached ketama appends port number to hostname if it's not 11211
-  if (strcmp(srv->port, MC_PORT) != 0)
-    {
-      *namep++ = ':';
-      namep = mempcpy(namep, srv->port, port_len);
-    }
-  namep += snprintf((char*) namep, 14, "-%u", point);
-  // libmemcached ketama uses Bob Jenkins' "one at a time" hashing
-  return omc_hash_jenkins_oat(name, namep - name);
-}
-
 static int omc_ketama_point_cmp(const void *v1, const void *v2)
 {
   const omc_ketama_point_t *p1 = v1, *p2 = v2;
@@ -532,31 +509,32 @@ static int omc_ketama_point_cmp(const void *v1, const void *v2)
 
 static omc_ketama_t *omc_ketama_create(omcache_t *mc)
 {
-  // libmemcached ketama has 100 points per server, we use the same to be compatible
-  size_t points_per_entry = 100;
-  size_t cidx = 0, total_points = mc->server_count * points_per_entry;
+  uint32_t pps = mc->dist_method->points_per_server;
+  uint32_t eps = mc->dist_method->entries_per_point;
+  size_t cidx = 0, total_points = mc->server_count * pps * eps;
   omc_ketama_t *ktm = (omc_ketama_t *) malloc(sizeof(omc_ketama_t) + total_points * sizeof(omc_ketama_point_t));
 
-  ktm->point_count = total_points;
-  for (ssize_t i=0; i<mc->server_count; i++)
+  for (ssize_t i = 0; i < mc->server_count; i ++)
     {
-      for (size_t p=0; p<points_per_entry; p++)
+      omc_srv_t *srv = mc->servers[i];
+      uint32_t hashes[eps];
+      for (size_t p = 0; p < pps; p ++)
         {
-          ktm->points[cidx++] = (omc_ketama_point_t) {
-            .srv = mc->servers[i],
-            .hash_value = omc_ketama_hash(mc->servers[i], p),
-            };
+          uint32_t sp_count = mc->dist_method->point_hash_func(srv->hostname, srv->port, p, hashes);
+          for (uint32_t e = 0; e < sp_count; e ++)
+            ktm->points[cidx++] = (omc_ketama_point_t) { .srv = srv, .hash_value = hashes[e] };
         }
     }
 
-  qsort(ktm->points, total_points, sizeof(omc_ketama_point_t), omc_ketama_point_cmp);
+  ktm->point_count = cidx;
+  qsort(ktm->points, ktm->point_count, sizeof(omc_ketama_point_t), omc_ketama_point_cmp);
 
   return ktm;
 }
 
 static int omc_ketama_lookup(omcache_t *mc, const unsigned char *key, size_t key_len)
 {
-  uint32_t hash_value = omc_hash_jenkins_oat(key, key_len);
+  uint32_t hash_value = mc->dist_method->key_hash_func(key, key_len);
   const omc_ketama_point_t *first = mc->ketama->points, *last = mc->ketama->points + mc->ketama->point_count;
   const omc_ketama_point_t *left = first, *right = last, *selected;
   bool wrap = false;

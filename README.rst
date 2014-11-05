@@ -43,6 +43,11 @@ keys.  Libmemcached's failover mechanism has traditionally been poorly
 documented and its details have changed occasionally between the releases
 so 100% compatibility is not possible.
 
+The default KETAMA implementation was changed in libmemcached 1.0.10.
+OMcache defaults to the new algorithm but also has support for the older
+algorithm, the caller must select the older algorithm if compatibility with
+older libmemcached versions is required.
+
 OMcache also provides a thin API compatibility wrapper header which allows
 simple applications to be converted to use OMcache instead of libmemcached
 by including "omcache_libmemcached.h" instead of "libmemcached/memcached.h".

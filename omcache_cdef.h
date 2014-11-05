@@ -162,6 +162,73 @@ int omcache_set_buffering(omcache_t *mc, uint32_t enabled);
 int omcache_set_servers(omcache_t *mc, const char *servers);
 
 /**
+ * Point hashing function for Ketama.
+ * @param hostname Memcache server hostname.
+ * @param portname Memcache server portname (may be a symbolic name from /etc/services).
+ * @param point Ketama point index in the range (0 .. dist->point_per_server - 1)
+ * @param hashes Array of dist->entries_per_point hash_values that the hash function
+ *               needs to set.  The function can also set fewer points.
+ * @return The number of hash values set.
+ */
+typedef uint32_t (omc_ketama_point_hash_func)(const char *hostname, const char *portname, uint32_t point, uint32_t *hashes);
+
+/**
+ * Key hashing function for Ketama.
+ * @param key Memcache object key.
+ * @param key_len Memcache object key length.
+ * @return Hash value of the key.
+ */
+typedef uint32_t (omc_ketama_key_hash_func)(const unsigned char *key, size_t key_len);
+
+typedef const struct omcache_dist_s
+{
+  int omcache_version;         ///< OMcache client version
+  uint32_t points_per_server;  ///< Number of ketama points per server
+  uint32_t entries_per_point;  ///< Number of ketama entries per point
+  omc_ketama_point_hash_func *point_hash_func;  ///< Hash function for points
+  omc_ketama_key_hash_func *key_hash_func;      ///< Hash function for keys
+} omcache_dist_t;
+
+/**
+ * Consistent distribution function compatible with libmemcached's
+ * MEMCACHED_BEHAVIOR_KETAMA
+ *
+ * NOTE: use omcache_dist_libmemcached_ketama_pre110 for compatibility with
+ * libmemcached versions before 1.0.10 as those versions had a bug that
+ * caused distribution to use md5 for hosts and Jenkins hash for keys.
+ *
+ * This is the default distribution method.
+ */
+omcache_dist_t omcache_dist_libmemcached_ketama;
+
+/**
+ * Consistent distribution function compatible with libmemcached's
+ * MEMCACHED_BEHAVIOR_KETAMA_WEIGHTED when all server weights are 1.
+ * OMcache does not have a concept of server weights at the moment.
+ */
+omcache_dist_t omcache_dist_libmemcached_ketama_weighted;
+
+/**
+ * Consistent distribution function compatible with libmemcached's
+ * MEMCACHED_BEHAVIOR_KETAMA prior to libmemcached 1.0.10
+ *
+ * NOTE: libmemcached prior to 1.0.10 always used
+ * MEMCACHED_BEHAVIOR_KETAMA_WEIGHTED even if MEMCACHED_BEHAVIOR_KETAMA was
+ * requested, but kept using Jenkins one-at-a-time hash for keys making it
+ * incompatible with correctly any operating distribution method, see
+ * https://bugs.launchpad.net/libmemcached/+bug/1009493
+ */
+omcache_dist_t omcache_dist_libmemcached_ketama_pre1010;
+
+/**
+ * Set a log callback for the OMcache handle.
+ * @param mc OMcache handle.
+ * @param method Distribution method (omcache_dist_t) to use.
+ * @return OMCACHE_OK on success.
+ */
+int omcache_set_distribution_method(omcache_t *mc, omcache_dist_t *method);
+
+/**
  * Log callback function type.
  * @param context Opaque context set in omcache_set_log_callback()
  * @param level Log message level; levels are defined in <sys/syslog.h>.
