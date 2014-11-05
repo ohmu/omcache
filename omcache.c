@@ -619,7 +619,9 @@ int omcache_server_index_for_key(omcache_t *mc, const unsigned char *key, size_t
 static void omc_srv_disable(omcache_t *mc, omc_srv_t *srv)
 {
   // disable server until reconnect timeout
-  omc_srv_log(LOG_INFO, srv, "disabling server for %u msec", mc->reconnect_timeout_msec);
+  // log at higher level if it's not yet disabled
+  omc_srv_log(srv->disabled ? LOG_INFO : LOG_NOTICE, srv,
+              "disabling server for %u msec", mc->reconnect_timeout_msec);
   srv->retry_at = omc_msec() + mc->reconnect_timeout_msec;
   srv->disabled = true;
   // clear addrinfo cache to force fresh addrs to be used on retry
@@ -944,7 +946,7 @@ static int omc_srv_read(omcache_t *mc, omc_srv_t *srv, omc_resp_lookup_t *rlooku
               srv->expected_noop = 0;
               if (srv->disabled)
                 {
-                  omc_srv_log(LOG_INFO, srv, "%s", "re-enabling server");
+                  omc_srv_log(LOG_NOTICE, srv, "%s", "re-enabling server");
                   srv->disabled = false;
                 }
               srv->recv_buffer.r += msg_size;
@@ -1445,7 +1447,8 @@ int omcache_command(omcache_t *mc,
 
           if (server_index >= mc->server_count || server_index < 0)
             {
-              omc_log(LOG_NOTICE, "%s", "valid server not found, dropping request");
+              if (req->server_index != -1)
+                omc_log(LOG_NOTICE, "dropping request, server index %d is not valid", server_index);
               ret = OMCACHE_NO_SERVERS;
               continue;
             }
@@ -1460,8 +1463,12 @@ int omcache_command(omcache_t *mc,
               omc_srv_debug(srv, "io: %s", omcache_strerror(ret));
               if (ret != OMCACHE_AGAIN && ret != OMCACHE_OK)
                 {
-                  omc_srv_log(LOG_WARNING, srv, "%s", "flush failed, dropping request");
+                  omc_srv_log(LOG_NOTICE, srv, "dropping request, flush failed: %s", omcache_strerror(ret));
                   ret = OMCACHE_NO_SERVERS;
+                  // if we used ketama we'll reschedule the request if the
+                  // originally selected server was offlined by omc_srv_io
+                  if (req->server_index == -1 && srv->disabled)
+                    i --;
                   continue;
                 }
               ret = OMCACHE_OK;
