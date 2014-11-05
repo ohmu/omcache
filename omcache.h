@@ -10,7 +10,7 @@
  */
 
 #ifndef _OMCACHE_H
-#define OMCACHE_H 1
+#define _OMCACHE_H 1
 
 #include <stdint.h>
 #include <sys/types.h>

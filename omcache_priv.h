@@ -10,7 +10,7 @@
  */
 
 #ifndef _OMCACHE_PRIV_H
-#define OMCACHE_PRIV_H 1
+#define _OMCACHE_PRIV_H 1
 
 #include "omcache.h"
 #include "memcached_protocol_binary.h"
