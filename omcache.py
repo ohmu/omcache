@@ -154,6 +154,18 @@ class OMcache(object):
             server_list = ",".join(server_list)
         return _oc.omcache_set_servers(self.omc, _to_bytes(server_list))
 
+    @_omc_return("omcache_set_distribution_method")
+    def set_distribution_method(self, method):
+        if method == "libmemcached_ketama":
+            ms = _ffi.addressof(_oc.omcache_dist_libmemcached_ketama)
+        elif method == "libmemcached_ketama_weighted":
+            ms = _ffi.addressof(_oc.omcache_dist_libmemcached_ketama_weighted)
+        elif method == "libmemcached_ketama_pre1010":
+            ms = _ffi.addressof(_oc.omcache_dist_libmemcached_ketama_pre1010)
+        else:
+            raise Error("invalid distribution method {0!r}".format(method))
+        return _oc.omcache_set_distribution_method(self.omc, ms)
+
     @property
     def connect_timeout(self):
         return self._conn_timeout

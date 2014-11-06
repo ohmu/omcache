@@ -54,21 +54,31 @@ class Client(omcache.OMcache):
         if binary is False:
             warnings.warn("OMcache always uses binary protocol, ignoring binary=False")
         super(Client, self).__init__(servers)
+        self._behaviors = {}
         if behaviors:
-            for k, v in behaviors.items():
-                if k in ("cas", "no_block", "remove_failed", "auto_eject", "failure_limit"):
-                    continue
-                elif k == "dead_timeout":
-                    self.dead_timeout = v * 1000  # seconds in pylibmc
-                elif k == "retry_timeout":
-                    self.reconnect_timeout = v * 1000  # seconds in pylibmc
-                elif k == "connect_timeout":
-                    self.connect_timeout = v  # milliseconds in pylibmc
-                elif k == "ketama":
-                    if not v:
-                        warnings.warn("OMcache always uses ketama")
-                else:
-                    warnings.warn("OMcache does not support behavior {0!r}".format(k))
+            self.behaviors = behaviors
+
+    @property
+    def behaviors(self):
+        return self._behaviors
+
+    @behaviors.setter
+    def behaviors(self, behaviors):
+        for k, v in behaviors.items():
+            if k in ("cas", "no_block", "remove_failed", "auto_eject", "failure_limit"):
+                pass
+            elif k == "dead_timeout":
+                self.dead_timeout = v * 1000  # seconds in pylibmc
+            elif k == "retry_timeout":
+                self.reconnect_timeout = v * 1000  # seconds in pylibmc
+            elif k == "connect_timeout":
+                self.connect_timeout = v  # milliseconds in pylibmc
+            elif k in ("ketama", "ketama_weighted", "ketama_pre1010") and v:
+                self.set_distribution_method("libmemcached_" + k)
+            else:
+                warnings.warn("OMcache does not support behavior {0!r}: {1!r}".format(k, v))
+                continue
+            self._behaviors[k] = v
 
     incr = omcache.OMcache.increment
     decr = omcache.OMcache.decrement
