@@ -1,6 +1,10 @@
+*.gcda
+*.gcno
+*.gcov
 *.o
 *.pyc
 *~
 __pycache__/
 libomcache.a
 libomcache.so*
+tests/test_omcache

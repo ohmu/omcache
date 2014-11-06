@@ -12,5 +12,6 @@
 /python-omcache.prerm.debhelper
 /pyversions
 /stamp-makefile-build
+/stamp-makefile-check
 /stamp-makefile-install
 /tmp/
