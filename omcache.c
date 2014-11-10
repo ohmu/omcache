@@ -104,7 +104,8 @@ struct omcache_s
   struct pollfd *server_polls;
   ssize_t server_count;
   int *fd_map;
-  int fd_map_max;
+  int fd_map_min;
+  int fd_map_size;
 
   // distribution
   omc_ketama_t *ketama;
@@ -163,9 +164,6 @@ omcache_t *omcache_init(void)
   mc->connect_timeout_msec = 10 * 1000;
   mc->reconnect_timeout_msec = 10 * 1000;
   mc->dead_timeout_msec = 10 * 1000;
-  mc->fd_map_max = 1024;
-  mc->fd_map = malloc(mc->fd_map_max * sizeof(*mc->fd_map));
-  memset(mc->fd_map, 0xff, mc->fd_map_max * sizeof(*mc->fd_map));
   mc->dist_method = &omcache_dist_libmemcached_ketama;
   return mc;
 }
@@ -287,7 +285,7 @@ static int omc_srv_free(omcache_t *mc, omc_srv_t *srv)
     {
       shutdown(srv->sock, SHUT_RDWR);
       close(srv->sock);
-      mc->fd_map[srv->sock] = -1;
+      mc->fd_map[srv->sock - mc->fd_map_min] = -1;
       srv->sock = -1;
     }
   if (srv->addrs)
@@ -385,6 +383,8 @@ int omcache_set_servers(omcache_t *mc, const char *servers)
     {
       omc_srv_debug(mc->servers[i], "server #%zd", i);
       mc->servers[i]->list_index = i;
+      if (mc->servers[i]->sock >= 0)
+        mc->fd_map[mc->servers[i]->sock - mc->fd_map_min] = i;
     }
 
   // rerun distribution
@@ -616,7 +616,7 @@ omc_srv_reset(omcache_t *mc, omc_srv_t *srv, const char *log_msg)
   if (srv->sock != -1)
     {
       close(srv->sock);
-      mc->fd_map[srv->sock] = -1;
+      mc->fd_map[srv->sock - mc->fd_map_min] = -1;
     }
   srv->connected = false;
   srv->sock = -1;
@@ -697,14 +697,24 @@ static int omc_srv_connect(omcache_t *mc, omc_srv_t *srv)
               omc_srv_disable(mc, srv);
               return OMCACHE_SERVER_FAILURE;
             }
-          if (sock >= mc->fd_map_max)
+          int fd_map_offset = sock - mc->fd_map_min;
+          if (fd_map_offset < 0 || fd_map_offset >= mc->fd_map_size)
             {
-              int old_max = mc->fd_map_max;
-              mc->fd_map_max += 16;
-              mc->fd_map = realloc(mc->fd_map, mc->fd_map_max * sizeof(*mc->fd_map));
-              memset(&mc->fd_map[old_max], 0xff, 16 * sizeof(*mc->fd_map));
+              int new_min = min(sock, mc->fd_map ? mc->fd_map_min : sock);
+              int new_size = (fd_map_offset < 0) ? mc->fd_map_size - fd_map_offset : fd_map_offset + 16;
+              int *new_map = malloc(new_size * sizeof(int));
+              memset(new_map, 0xff, new_size * sizeof(int));
+              if (fd_map_offset < 0)
+                memcpy(new_map - fd_map_offset, mc->fd_map, mc->fd_map_size * sizeof(int));
+              else if (mc->fd_map_size > 0)
+                memcpy(new_map, mc->fd_map, mc->fd_map_size * sizeof(int));
+              free(mc->fd_map);
+              mc->fd_map = new_map;
+              mc->fd_map_min = new_min;
+              mc->fd_map_size = new_size;
+              fd_map_offset = sock - mc->fd_map_min;
             }
-          mc->fd_map[sock] = srv->list_index;
+          mc->fd_map[fd_map_offset] = srv->list_index;
           err = connect(sock, srv->addrp->ai_addr, srv->addrp->ai_addrlen);
           srv->last_io_attempt = now;
           srv->addrp = srv->addrp->ai_next;
@@ -753,10 +763,11 @@ static int omc_srv_connect(omcache_t *mc, omc_srv_t *srv)
       if (getsockopt(srv->sock, SOL_SOCKET, SO_ERROR, &err, &err_len) == -1)
         {
           omc_srv_log(LOG_WARNING, srv, "getsockopt failed: %s", strerror(errno));
-          err = SO_ERROR;
+          err = errno;
         }
       if (err)
         {
+          errno = err;
           omc_srv_reset(mc, srv, "async connect failed");
           return OMCACHE_AGAIN;
         }
@@ -1124,7 +1135,13 @@ int omcache_io(omcache_t *mc,
       now = omc_msec();
       for (int i=0; i<nfds; i++)
         {
-          omc_srv_t *srv = mc->servers[mc->fd_map[pfds[i].fd]];
+          int server_index = mc->fd_map[pfds[i].fd - mc->fd_map_min];
+          omc_srv_t *srv = mc->servers[server_index];
+          if (srv->sock != pfds[i].fd)
+            {
+              omc_srv_log(LOG_ERR, srv, "server socket %d does not match poll fd %d!", srv->sock, pfds[i].fd);
+              abort();
+            }
           if (!pfds[i].revents)
             {
               // reset connections that have failed

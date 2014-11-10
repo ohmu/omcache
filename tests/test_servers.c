@@ -10,6 +10,8 @@
  */
 
 #include "test_omcache.h"
+#include <unistd.h>
+
 
 START_TEST(test_server_list)
 {
@@ -133,6 +135,43 @@ START_TEST(test_multiple_times_same_server)
 }
 END_TEST
 
+START_TEST(test_fd_map_allocations)
+{
+  omcache_t *oc = ot_init_omcache(1, LOG_INFO);
+  char sbuf[sizeof("127.0.0.1:11211,") * 35 + 1], *p = sbuf;
+  int first_pipes[2], pipes[2];
+
+  // create some pipes to use up filedescriptors
+  pipe(first_pipes);
+
+  for (int i = 0; i < 20; i++)
+    {
+      pipe(pipes); // allocate some more pipes
+      p += sprintf(p, "%s127.0.0.1:%d", i == 0 ? "" : ",", ot_get_memcached(0));
+    }
+  ck_omcache_ok(omcache_set_servers(oc, sbuf));
+  ck_omcache_ok(omcache_noop(oc, 4, 1000));
+
+  ck_omcache_ok(omcache_set_buffering(oc, true));
+  for (int i = 0; i < 20; i++)
+    ck_omcache_ok(omcache_noop(oc, i, 100));
+  ck_omcache_ok(omcache_io(oc, NULL, NULL, NULL, NULL, 5000));
+
+  // close the early pipes
+  close(first_pipes[0]);
+  close(first_pipes[1]);
+
+  // add another server
+  p += sprintf(p, ",127.0.0.1:%d", ot_get_memcached(1));
+  ck_omcache_ok(omcache_set_servers(oc, sbuf));
+  for (int i = 0; i < 21; i++)
+    ck_omcache_ok(omcache_noop(oc, i, 100));
+  ck_omcache_ok(omcache_io(oc, NULL, NULL, NULL, NULL, 5000));
+
+  omcache_free(oc);
+}
+END_TEST
+
 START_TEST(test_ipv6)
 {
   // NOTE: memcached doesn't support specifying a literal IPv6 address on
@@ -171,6 +210,7 @@ Suite *ot_suite_servers(void)
   ot_tcase_add(s, test_no_servers);
   ot_tcase_add(s, test_invalid_servers);
   ot_tcase_add(s, test_multiple_times_same_server);
+  ot_tcase_add(s, test_fd_map_allocations);
   ot_tcase_add(s, test_ipv6);
 
   return s;
