@@ -103,9 +103,7 @@ struct omcache_s
   omc_srv_t **servers;
   struct pollfd *server_polls;
   ssize_t server_count;
-  int *fd_map;
-  int fd_map_min;
-  int fd_map_size;
+  omc_int_hash_table_t *fd_table;
 
   // distribution
   omc_ketama_t *ketama;
@@ -185,7 +183,7 @@ int omcache_free(omcache_t *mc)
     }
   free(mc->server_polls);
   free(mc->ketama);
-  free(mc->fd_map);
+  omc_int_hash_table_free(mc->fd_table);
   memset(mc, 'M', sizeof(*mc));
   free(mc);
   return OMCACHE_OK;
@@ -285,7 +283,7 @@ static int omc_srv_free(omcache_t *mc, omc_srv_t *srv)
     {
       shutdown(srv->sock, SHUT_RDWR);
       close(srv->sock);
-      mc->fd_map[srv->sock - mc->fd_map_min] = -1;
+      omc_int_hash_table_del(mc->fd_table, srv->sock);
       srv->sock = -1;
     }
   if (srv->addrs)
@@ -378,13 +376,15 @@ int omcache_set_servers(omcache_t *mc, const char *servers)
 
   mc->servers = srv_new;
   mc->server_count = srv_new_count;
-  // reset list indexes
+
+  // reset list indices and fd_table
+  mc->fd_table = omc_int_hash_table_init(mc->fd_table, mc->server_count);
   for (ssize_t i=0; i<mc->server_count; i++)
     {
       omc_srv_debug(mc->servers[i], "server #%zd", i);
       mc->servers[i]->list_index = i;
       if (mc->servers[i]->sock >= 0)
-        mc->fd_map[mc->servers[i]->sock - mc->fd_map_min] = i;
+        omc_int_hash_table_add(mc->fd_table, mc->servers[i]->sock, i);
     }
 
   // rerun distribution
@@ -616,7 +616,7 @@ omc_srv_reset(omcache_t *mc, omc_srv_t *srv, const char *log_msg)
   if (srv->sock != -1)
     {
       close(srv->sock);
-      mc->fd_map[srv->sock - mc->fd_map_min] = -1;
+      omc_int_hash_table_del(mc->fd_table, srv->sock);
     }
   srv->connected = false;
   srv->sock = -1;
@@ -697,24 +697,7 @@ static int omc_srv_connect(omcache_t *mc, omc_srv_t *srv)
               omc_srv_disable(mc, srv);
               return OMCACHE_SERVER_FAILURE;
             }
-          int fd_map_offset = sock - mc->fd_map_min;
-          if (fd_map_offset < 0 || fd_map_offset >= mc->fd_map_size)
-            {
-              int new_min = min(sock, mc->fd_map ? mc->fd_map_min : sock);
-              int new_size = (fd_map_offset < 0) ? mc->fd_map_size - fd_map_offset : fd_map_offset + 16;
-              int *new_map = malloc(new_size * sizeof(int));
-              memset(new_map, 0xff, new_size * sizeof(int));
-              if (fd_map_offset < 0)
-                memcpy(new_map - fd_map_offset, mc->fd_map, mc->fd_map_size * sizeof(int));
-              else if (mc->fd_map_size > 0)
-                memcpy(new_map, mc->fd_map, mc->fd_map_size * sizeof(int));
-              free(mc->fd_map);
-              mc->fd_map = new_map;
-              mc->fd_map_min = new_min;
-              mc->fd_map_size = new_size;
-              fd_map_offset = sock - mc->fd_map_min;
-            }
-          mc->fd_map[fd_map_offset] = srv->list_index;
+          omc_int_hash_table_add(mc->fd_table, sock, srv->list_index);
           err = connect(sock, srv->addrp->ai_addr, srv->addrp->ai_addrlen);
           srv->last_io_attempt = now;
           srv->addrp = srv->addrp->ai_next;
@@ -1135,7 +1118,12 @@ int omcache_io(omcache_t *mc,
       now = omc_msec();
       for (int i=0; i<nfds; i++)
         {
-          int server_index = mc->fd_map[pfds[i].fd - mc->fd_map_min];
+          int server_index = omc_int_hash_table_find(mc->fd_table, pfds[i].fd);
+          if (server_index == -1)
+            {
+              omc_log(LOG_ERR, "server socket %d not found from fd_table!", pfds[i].fd);
+              abort();
+            }
           omc_srv_t *srv = mc->servers[server_index];
           if (srv->sock != pfds[i].fd)
             {

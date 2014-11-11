@@ -8,7 +8,7 @@ INCLUDEDIR ?= $(PREFIX)/include
 STLIB_A = libomcache.a
 SHLIB_SO = libomcache.so
 SHLIB_V = $(SHLIB_SO).0
-OBJ = omcache.o commands.o dist.o md5.o
+OBJ = omcache.o commands.o dist.o md5.o util.o
 CPPFLAGS ?= -Wall -Wextra
 CFLAGS ?= -g -O2
 
@@ -77,4 +77,4 @@ check-coverage:
 	$(MAKE) CFLAGS="$(CFLAGS) -fprofile-arcs -ftest-coverage" \
 		LDFLAGS="$(LDFLAGS) -fprofile-arcs -ftest-coverage" \
 		-C tests check
-	gcov -rb omcache.c commands.c dist.c md5.c
+	gcov -rb $(OBJ:.o=.c)
