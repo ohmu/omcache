@@ -662,13 +662,18 @@ static int omc_srv_connect(omcache_t *mc, omc_srv_t *srv)
           struct addrinfo hints;
           memset(&hints, 0, sizeof(hints));
           hints.ai_socktype = SOCK_STREAM;
-          hints.ai_flags = AI_ADDRCONFIG;
-          // XXX: getaddrinfo blocks, use libares-c or something?
-          // getaddrinfo_a isn't really usable.
-          // alternatively just document this and let the calling
-          // application handle name resolution before in whatever async way
-          // it likes before handing the host to us.
+          // We'll first see if the address is numeric to avoid all the
+          // resolution overhead of a regular lookup which happens even if
+          // the caller supplied a numeric host and service and then fall
+          // back to AI_ADDRCONFIG lookup if that fails.
+          hints.ai_flags = AI_NUMERICHOST | AI_NUMERICSERV;
           err = getaddrinfo(srv->hostname, srv->port, &hints, &srv->addrs);
+          if (err == EAI_NONAME)
+            {
+              // XXX: this can block, use libasyncns or libares-c?
+              hints.ai_flags = AI_ADDRCONFIG;
+              err = getaddrinfo(srv->hostname, srv->port, &hints, &srv->addrs);
+            }
           if (err != 0)
             {
               omc_srv_log(LOG_WARNING, srv, "getaddrinfo: %s", gai_strerror(err));

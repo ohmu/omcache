@@ -194,7 +194,7 @@ START_TEST(test_ipv6)
     return;
   omcache_t *oc = ot_init_omcache(0, LOG_DEBUG);
   int mc_port = ot_start_memcached("localhost6", NULL);
-  sprintf(linebuf, "[::1]:%d", mc_port);
+  sprintf(linebuf, "localhost6:%d", mc_port);
   ck_omcache_ok(omcache_set_servers(oc, linebuf));
   ck_omcache_ok(omcache_noop(oc, 0, 1000));
   omcache_free(oc);

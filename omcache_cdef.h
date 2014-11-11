@@ -151,6 +151,9 @@ int omcache_set_buffering(omcache_t *mc, uint32_t enabled);
 
 /**
  * Set the server(s) to use with an OMcache handle.
+ * OMcache does not currently implement asynchronous name lookups; to avoid
+ * connecting to servers from blocking the server list should only include
+ * IP addresses.
  * @param mc OMcache handle.
  * @param servers Comma-separated list of memcached servers.
  *                Any existing servers on OMcache's server list that do not
