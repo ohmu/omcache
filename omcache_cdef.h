@@ -202,14 +202,14 @@ typedef const struct omcache_dist_s
  *
  * This is the default distribution method.
  */
-omcache_dist_t omcache_dist_libmemcached_ketama;
+extern omcache_dist_t omcache_dist_libmemcached_ketama;
 
 /**
  * Consistent distribution function compatible with libmemcached's
  * MEMCACHED_BEHAVIOR_KETAMA_WEIGHTED when all server weights are 1.
  * OMcache does not have a concept of server weights at the moment.
  */
-omcache_dist_t omcache_dist_libmemcached_ketama_weighted;
+extern omcache_dist_t omcache_dist_libmemcached_ketama_weighted;
 
 /**
  * Consistent distribution function compatible with libmemcached's
@@ -221,7 +221,7 @@ omcache_dist_t omcache_dist_libmemcached_ketama_weighted;
  * incompatible with correctly any operating distribution method, see
  * https://bugs.launchpad.net/libmemcached/+bug/1009493
  */
-omcache_dist_t omcache_dist_libmemcached_ketama_pre1010;
+extern omcache_dist_t omcache_dist_libmemcached_ketama_pre1010;
 
 /**
  * Set a log callback for the OMcache handle.
