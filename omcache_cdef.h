@@ -17,6 +17,7 @@ typedef enum omcache_ret_e {
   OMCACHE_NOT_FOUND = 0x01,        ///< Key not found from memcached
   OMCACHE_KEY_EXISTS = 0x02,       ///< Conflicting key exists in memcached
   OMCACHE_TOO_LARGE_VALUE = 0x03,  ///< Value size exceeds maximum
+  OMCACHE_NOT_STORED = 0x05,       ///< Append or prepend value not stored
   OMCACHE_DELTA_BAD_VALUE = 0x06,  ///< Existing value can not be
                                    ///  incremented or decremented
   OMCACHE_FAIL = 0x0FFF,           ///< Command failed in memcached
@@ -537,6 +538,48 @@ int omcache_replace(omcache_t *mc,
                     const unsigned char *value, size_t value_len,
                     time_t expiration, uint32_t flags,
                     int32_t timeout_msec);
+
+/**
+ * Append a string to a value already stored in the backend.
+ * @param mc OMcache handle.
+ * @param key Key under which the value will be modified.
+ * @param key_len Length of the key.
+ * @param value String to append to the existing value.
+ * @param value_len Length of the value.
+ * @param cas CAS value for synchronization, see omcache_set().
+ * @param timeout_msec Maximum number of milliseconds to block while waiting
+ *                     for I/O to complete.  Zero means no blocking at all
+ *                     and a negative value blocks indefinitely.
+ * @return OMCACHE_OK if data was successfully written;
+ *         OMCACHE_BUFFERED if data was successfully added to write buffer.
+ *         OMCACHE_NOT_STORED the key was not set in the backend.
+ *         OMCACHE_KEY_EXISTS cas was set and did not match existing value.
+ */
+int omcache_append(omcache_t *mc,
+                   const unsigned char *key, size_t key_len,
+                   const unsigned char *value, size_t value_len,
+                   uint64_t cas, int32_t timeout_msec);
+
+/**
+ * Prepend a string to a value already stored in the backend.
+ * @param mc OMcache handle.
+ * @param key Key under which the value will be modified.
+ * @param key_len Length of the key.
+ * @param value String to prepend to the existing value.
+ * @param value_len Length of the value.
+ * @param cas CAS value for synchronization, see omcache_set().
+ * @param timeout_msec Maximum number of milliseconds to block while waiting
+ *                     for I/O to complete.  Zero means no blocking at all
+ *                     and a negative value blocks indefinitely.
+ * @return OMCACHE_OK if data was successfully written;
+ *         OMCACHE_BUFFERED if data was successfully added to write buffer.
+ *         OMCACHE_NOT_STORED the key was not set in the backend.
+ *         OMCACHE_KEY_EXISTS cas was set and did not match existing value.
+ */
+int omcache_prepend(omcache_t *mc,
+                   const unsigned char *key, size_t key_len,
+                   const unsigned char *value, size_t value_len,
+                   uint64_t cas, int32_t timeout_msec);
 
 /**
  * Atomically increment a counter for the given key.

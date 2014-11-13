@@ -147,6 +147,22 @@ class Client(omcache.OMcache):
         except omcache.NotFoundError:
             return False
 
+    def append(self, key, value):
+        value, _ = _s_value(value)  # ignore flags
+        try:
+            super(Client, self).append(key, value)
+            return True
+        except omcache.NotStoredError:
+            return False
+
+    def prepend(self, key, value):
+        value, _ = _s_value(value)  # ignore flags
+        try:
+            super(Client, self).prepend(key, value)
+            return True
+        except omcache.NotStoredError:
+            return False
+
     def set_multi(self, mapping, time=0, key_prefix=None):
         # pylibmc's set_multi returns a list of failed keys, but we don't
         # have such an operation at the moment without blocking or using

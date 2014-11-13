@@ -75,20 +75,24 @@ static int omc_set_cmd(omcache_t *mc, protocol_binary_command opcode,
                        time_t expiration, uint32_t flags,
                        uint64_t cas, int32_t timeout_msec)
 {
-  struct protocol_binary_set_request_body_s body = {
+  struct protocol_binary_set_request_body_s extra = {
     .flags = htobe32(flags),
     .expiration = htobe32(expiration),
     };
+  size_t extra_len = sizeof(extra);
+  if (opcode == PROTOCOL_BINARY_CMD_APPEND || opcode == PROTOCOL_BINARY_CMD_APPENDQ ||
+      opcode == PROTOCOL_BINARY_CMD_PREPEND || opcode == PROTOCOL_BINARY_CMD_PREPENDQ)
+    extra_len = 0;
   omcache_req_t req[1] = {{
     .server_index = -1,
     .header = {
       .opcode = opcode,
-      .extlen = sizeof(body),
+      .extlen = extra_len,
       .keylen = htobe16(key_len),
-      .bodylen = htobe32(key_len + value_len + sizeof(body)),
+      .bodylen = htobe32(key_len + value_len + extra_len),
       .cas = htobe64(cas),
       },
-    .extra = &body,
+    .extra = &extra,
     .key = key,
     .data = value,
     }};
@@ -126,6 +130,26 @@ int omcache_replace(omcache_t *mc,
   return omc_set_cmd(mc, QCMD(PROTOCOL_BINARY_CMD_REPLACE),
                      key, key_len, value, value_len,
                      expiration, flags, 0, timeout_msec);
+}
+
+int omcache_append(omcache_t *mc,
+                   const unsigned char *key, size_t key_len,
+                   const unsigned char *value, size_t value_len,
+                   uint64_t cas, int32_t timeout_msec)
+{
+  return omc_set_cmd(mc, QCMD(PROTOCOL_BINARY_CMD_APPEND),
+                     key, key_len, value, value_len,
+                     0, 0, cas, timeout_msec);
+}
+
+int omcache_prepend(omcache_t *mc,
+                   const unsigned char *key, size_t key_len,
+                   const unsigned char *value, size_t value_len,
+                   uint64_t cas, int32_t timeout_msec)
+{
+  return omc_set_cmd(mc, QCMD(PROTOCOL_BINARY_CMD_PREPEND),
+                     key, key_len, value, value_len,
+                     0, 0, cas, timeout_msec);
 }
 
 struct protocol_binary_delta_request_body_s {

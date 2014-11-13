@@ -167,6 +167,34 @@ START_TEST(test_add_and_replace)
 }
 END_TEST
 
+START_TEST(test_append_and_prepend)
+{
+  const unsigned char key[] = "test_append_and_prepend";
+  size_t key_len = sizeof(key) - 1;
+  const unsigned char *get_val;
+  size_t val_len;
+  uint64_t cas;
+  omcache_t *oc = ot_init_omcache(2, LOG_INFO);
+
+  ck_omcache(omcache_append(oc, key, key_len, (cuc *) "zxcv", 4, 0, TIMEOUT), OMCACHE_NOT_STORED);
+  ck_omcache(omcache_prepend(oc, key, key_len, (cuc *) "zxcv", 4, 0, TIMEOUT), OMCACHE_NOT_STORED);
+
+  ck_omcache_ok(omcache_set(oc, key, key_len, (cuc *) "asdf", 4, 0, 42, 0, TIMEOUT));
+  ck_omcache_ok(omcache_append(oc, key, key_len, (cuc *) "!!", 2, 0, TIMEOUT));
+  ck_omcache_ok(omcache_get(oc, key, key_len, &get_val, &val_len, NULL, &cas, TIMEOUT));
+  ck_assert_uint_eq(val_len, 6);
+  ck_assert_int_eq(memcmp(get_val, "asdf!!", 6), 0);
+
+  ck_omcache(omcache_prepend(oc, key, key_len, (cuc *) "QWE", 3, 1, TIMEOUT), OMCACHE_KEY_EXISTS);
+  ck_omcache_ok(omcache_prepend(oc, key, key_len, (cuc *) "QWE", 3, cas, TIMEOUT));
+  ck_omcache_ok(omcache_get(oc, key, key_len, &get_val, &val_len, NULL, &cas, TIMEOUT));
+  ck_assert_uint_eq(val_len, 9);
+  ck_assert_int_eq(memcmp(get_val, "QWEasdf!!", 9), 0);
+
+  omcache_free(oc);
+}
+END_TEST
+
 START_TEST(test_increment_and_decrement)
 {
   const unsigned char key[] = "test_increment_and_decrement";
@@ -365,6 +393,7 @@ Suite *ot_suite_commands(void)
   ot_tcase_add(s, test_set_get_delete);
   ot_tcase_add(s, test_cas_and_flags);
   ot_tcase_add(s, test_add_and_replace);
+  ot_tcase_add(s, test_append_and_prepend);
   ot_tcase_add(s, test_increment_and_decrement);
   ot_tcase_add(s, test_req_id_wraparound);
   ot_tcase_add(s, test_buffering);

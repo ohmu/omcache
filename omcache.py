@@ -56,6 +56,18 @@ class KeyExistsError(CommandError):
     status = _oc.OMCACHE_KEY_EXISTS
 
 
+class TooLargeValueError(CommandError):
+    status = _oc.OMCACHE_TOO_LARGE_VALUE
+
+
+class NotStoredError(CommandError):
+    status = _oc.OMCACHE_NOT_STORED
+
+
+class DeltaBadValueError(CommandError):
+    status = _oc.OMCACHE_DELTA_BAD_VALUE
+
+
 def _to_bytes(s):
     if isinstance(s, str if version_info[0] >= 3 else unicode):
         return s.encode("utf8")
@@ -136,6 +148,12 @@ class OMcache(object):
             raise NotFoundError
         if ret == _oc.OMCACHE_KEY_EXISTS:
             raise KeyExistsError
+        if ret == _oc.OMCACHE_TOO_LARGE_VALUE:
+            raise TooLargeValueError
+        if ret == _oc.OMCACHE_NOT_STORED:
+            raise NotStoredError
+        if ret == _oc.OMCACHE_DELTA_BAD_VALUE:
+            raise DeltaBadValueError
         errstr = _to_string(_oc.omcache_strerror(ret))
         raise CommandError("{0}: {1}".format(name, errstr), status=ret)
 
@@ -257,6 +275,20 @@ class OMcache(object):
         value = _to_bytes(value)
         timeout = timeout if timeout is not None else self.io_timeout
         return _oc.omcache_replace(self.omc, key, len(key), value, len(value), expiration, flags, timeout)
+
+    @_omc_return("omcache_append")
+    def append(self, key, value, cas=0, timeout=None):
+        key = _to_bytes(key)
+        value = _to_bytes(value)
+        timeout = timeout if timeout is not None else self.io_timeout
+        return _oc.omcache_append(self.omc, key, len(key), value, len(value), cas, timeout)
+
+    @_omc_return("omcache_prepend")
+    def prepend(self, key, value, cas=0, timeout=None):
+        key = _to_bytes(key)
+        value = _to_bytes(value)
+        timeout = timeout if timeout is not None else self.io_timeout
+        return _oc.omcache_prepend(self.omc, key, len(key), value, len(value), cas, timeout)
 
     @_omc_return("omcache_delete")
     def delete(self, key, timeout=None):

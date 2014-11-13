@@ -197,6 +197,7 @@ const char *omcache_strerror(int rc)
     case OMCACHE_NOT_FOUND: return "Key not found from memcached";
     case OMCACHE_KEY_EXISTS: return "Conflicting key exists in memcached";
     case OMCACHE_TOO_LARGE_VALUE: return "Value size exceeds maximum";
+    case OMCACHE_NOT_STORED: return "Append or prepend value not stored";
     case OMCACHE_DELTA_BAD_VALUE: return "Existing value can not be incremented or decremented";
     case OMCACHE_FAIL: return "Command failed in memcached";
     case OMCACHE_AGAIN: return "Call would block, try again";
@@ -217,6 +218,7 @@ static int omc_map_mc_status_to_ret_code(protocol_binary_response_status status)
     case PROTOCOL_BINARY_RESPONSE_KEY_ENOENT: return OMCACHE_NOT_FOUND;
     case PROTOCOL_BINARY_RESPONSE_KEY_EEXISTS: return OMCACHE_KEY_EXISTS;
     case PROTOCOL_BINARY_RESPONSE_E2BIG: return OMCACHE_TOO_LARGE_VALUE;
+    case PROTOCOL_BINARY_RESPONSE_NOT_STORED: return OMCACHE_NOT_STORED;
     case PROTOCOL_BINARY_RESPONSE_DELTA_BADVAL: return OMCACHE_DELTA_BAD_VALUE;
     default:
       return OMCACHE_FAIL;

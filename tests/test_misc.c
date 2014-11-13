@@ -23,6 +23,7 @@ START_TEST(test_strerror)
         case OMCACHE_NOT_FOUND:
         case OMCACHE_KEY_EXISTS:
         case OMCACHE_TOO_LARGE_VALUE:
+        case OMCACHE_NOT_STORED:
         case OMCACHE_DELTA_BAD_VALUE:
         case OMCACHE_FAIL:
         case OMCACHE_AGAIN:

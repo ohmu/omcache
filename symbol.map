@@ -47,3 +47,10 @@ OMCACHE_0.1
 
   local: *;
 };
+
+OMCACHE_0.2
+{
+  global:
+    omcache_append;
+    omcache_prepend;
+} OMCACHE_0.1;
