@@ -78,3 +78,16 @@ check-coverage:
 		LDFLAGS="$(LDFLAGS) -fprofile-arcs -ftest-coverage" \
 		-C tests check
 	gcov -rb $(OBJ:.o=.c)
+
+check-coverity:
+	$(MAKE) clean
+	$(RM) -r cov-int omcache-cov-int.tar.gz
+	cov-build --dir cov-int $(MAKE)
+	tar zcvf omcache-cov-int.tar.gz cov-int
+	curl --verbose --form 'token=<.coverity-token' \
+		--form 'email=<.coverity-email' \
+		--form 'file=@omcache-cov-int.tar.gz' \
+		--form 'version=$(long_ver)' \
+		--form 'description=$(short_ver)' \
+		'https://scan.coverity.com/builds?project=saaros%2Fomcache'
+	$(RM) -r cov-int omcache-cov-int.tar.gz
