@@ -53,4 +53,5 @@ OMCACHE_0.2
   global:
     omcache_append;
     omcache_prepend;
+    omcache_touch;
 } OMCACHE_0.1;

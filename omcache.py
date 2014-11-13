@@ -296,6 +296,12 @@ class OMcache(object):
         timeout = timeout if timeout is not None else self.io_timeout
         return _oc.omcache_delete(self.omc, key, len(key), timeout)
 
+    @_omc_return("omcache_touch")
+    def touch(self, key, expiration=0, timeout=None):
+        key = _to_bytes(key)
+        timeout = timeout if timeout is not None else self.io_timeout
+        return _oc.omcache_touch(self.omc, key, len(key), expiration, timeout)
+
     def get(self, key, flags=False, cas=False, timeout=None):
         key = _to_bytes(key)
         timeout = timeout if timeout is not None else self.io_timeout

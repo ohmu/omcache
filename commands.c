@@ -228,6 +228,25 @@ int omcache_delete(omcache_t *mc,
   return omcache_command_status(mc, req, timeout_msec);
 }
 
+int omcache_touch(omcache_t *mc,
+                  const unsigned char *key, size_t key_len,
+                  time_t expiration, int32_t timeout_msec)
+{
+  uint32_t body_exp = htobe32(expiration);
+  omcache_req_t req[1] = {{
+    .server_index = -1,
+    .header = {
+      .opcode = PROTOCOL_BINARY_CMD_TOUCH,
+      .extlen = sizeof(body_exp),
+      .keylen = htobe16(key_len),
+      .bodylen = htobe32(key_len + sizeof(body_exp)),
+      },
+    .extra = &body_exp,
+    .key = key,
+    }};
+  return omcache_command_status(mc, req, timeout_msec);
+}
+
 int omcache_get_multi(omcache_t *mc,
                       const unsigned char **keys,
                       size_t *key_lens,

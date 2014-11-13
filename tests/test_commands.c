@@ -9,6 +9,7 @@
  *
  */
 
+#include <unistd.h>
 #include "test_omcache.h"
 
 #define TIMEOUT 2000
@@ -190,6 +191,32 @@ START_TEST(test_append_and_prepend)
   ck_omcache_ok(omcache_get(oc, key, key_len, &get_val, &val_len, NULL, &cas, TIMEOUT));
   ck_assert_uint_eq(val_len, 9);
   ck_assert_int_eq(memcmp(get_val, "QWEasdf!!", 9), 0);
+
+  omcache_free(oc);
+}
+END_TEST
+
+START_TEST(test_touch)
+{
+  const unsigned char key[] = "test_touch";
+  size_t key_len = sizeof(key) - 1;
+  const unsigned char *get_val;
+  size_t val_len;
+  uint64_t cas;
+  omcache_t *oc = ot_init_omcache(2, LOG_INFO);
+
+  ck_omcache(omcache_touch(oc, key, key_len, 4, TIMEOUT), OMCACHE_NOT_FOUND);
+  ck_omcache_ok(omcache_set(oc, key, key_len, (cuc *) "asdf", 4, 1, 0, 0, TIMEOUT));
+  usleep(1100000);
+  // touch should fail, the value alreayd expired
+  ck_omcache(omcache_touch(oc, key, key_len, 4, TIMEOUT), OMCACHE_NOT_FOUND);
+  ck_omcache_ok(omcache_set(oc, key, key_len, (cuc *) "asdf", 4, 1, 0, 0, TIMEOUT));
+  ck_omcache_ok(omcache_touch(oc, key, key_len, 10, TIMEOUT));
+  usleep(1500000);
+  // value should've been extended by touch
+  ck_omcache_ok(omcache_get(oc, key, key_len, &get_val, &val_len, NULL, &cas, TIMEOUT));
+  ck_assert_uint_eq(val_len, 4);
+  ck_assert_int_eq(memcmp(get_val, "asdf", 4), 0);
 
   omcache_free(oc);
 }
@@ -394,6 +421,7 @@ Suite *ot_suite_commands(void)
   ot_tcase_add(s, test_cas_and_flags);
   ot_tcase_add(s, test_add_and_replace);
   ot_tcase_add(s, test_append_and_prepend);
+  tcase_set_timeout(ot_tcase_add(s, test_touch), 10);
   ot_tcase_add(s, test_increment_and_decrement);
   ot_tcase_add(s, test_req_id_wraparound);
   ot_tcase_add(s, test_buffering);

@@ -648,6 +648,23 @@ int omcache_delete(omcache_t *mc,
                    int32_t timeout_msec);
 
 /**
+ * 'Touch' a key in the backend to extend its validity.
+ * @param mc OMcache handle.
+ * @param key Key to touch.
+ * @param key_len Length of the key.
+ * @param expiration Expire the value after this time.
+ * @param timeout_msec Maximum number of milliseconds to block while waiting
+ *                     for I/O to complete.  Zero means no blocking at all
+ *                     and a negative value blocks indefinitely.
+ * @return OMCACHE_OK if data was successfully written;
+ *         OMCACHE_BUFFERED if data was successfully added to write buffer.
+ *         OMCACHE_NOT_FOUND the key was not set in the backend.
+ */
+int omcache_touch(omcache_t *mc,
+                  const unsigned char *key, size_t key_len,
+                  time_t expiration, int32_t timeout_msec);
+
+/**
  * Look up a key from a backend.
  * @param mc OMcache handle.
  * @param key Key to look up.
