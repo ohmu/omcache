@@ -352,7 +352,22 @@ class OMcache(object):
                 results[key] = value
         return results
 
-    def increment(self, key, delta=1, initial=0, expiration=0, timeout=None):
+    def increment(self, key, delta=1, initial=None, expiration=0, timeout=None):
+        # Delta operation definition in the protocol is a bit weird; if
+        # 'expiration' is set to DELTA_NO_ADD (0xffffffff) the value will
+        # not be created if it doesn't exist yet, but since we have a
+        # 'initial' argument in the python api we'd really like to use it to
+        # signal whether or not a value should be initialized.
+        #
+        # To do that we'll map expiration to DELTA_NO_ADD if initial is None
+        # and expiration is empty and throw an error if initial is None but
+        # expiration isn't empty.
+
+        if initial is None:
+            if expiration:
+                raise Error("increment operation's initial must be set if expiration time is used")
+            expiration = DELTA_NO_ADD
+            initial = 0
         key = _to_bytes(key)
         timeout = timeout if timeout is not None else self.io_timeout
         ret = _oc.omcache_increment(self.omc, key, len(key), delta, initial, expiration, _u64p, timeout)
@@ -361,7 +376,13 @@ class OMcache(object):
             return None
         return _u64p[0]
 
-    def decrement(self, key, delta=1, initial=0, expiration=0, timeout=None):
+    def decrement(self, key, delta=1, initial=None, expiration=0, timeout=None):
+        # see the comment in increment()
+        if initial is None:
+            if expiration:
+                raise Error("decrement operation's initial must be set if expiration time is used")
+            expiration = DELTA_NO_ADD
+            initial = 0
         key = _to_bytes(key)
         timeout = timeout if timeout is not None else self.io_timeout
         ret = _oc.omcache_decrement(self.omc, key, len(key), delta, initial, expiration, _u64p, timeout)
