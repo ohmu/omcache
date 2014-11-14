@@ -18,7 +18,7 @@
 
 #include "omcache.h"
 
-#define MEMCACHED_EXPIRATION_NOT_ADD 0xffffffffU
+#define MEMCACHED_EXPIRATION_NOT_ADD OMCACHE_DELTA_NO_ADD
 #define MEMCACHED_SUCCESS OMCACHE_OK
 #define MEMCACHED_FAILURE OMCACHE_FAIL
 #define MEMCACHED_BUFFERED OMCACHE_BUFFERED
@@ -56,18 +56,33 @@ typedef const char *memcached_server_distribution_t;
     for (srvidx_ = 0; rc_ == OMCACHE_OK; srvidx_ ++) \
         rc_ = omcache_flush_all((mc), (expire), srvidx_, -1) ; \
     (rc_ == OMCACHE_NO_SERVERS) ? OMCACHE_OK : rc_; })
-#define memcached_increment_with_initial(mc,key,key_len,offset,initial,expiration,val) \
-    omcache_increment((mc), omc_cc_to_cuc(key), (key_len), (offset), (initial), (expiration), (val), 0)
-#define memcached_decrement_with_initial(mc,key,key_len,offset,initial,expiration,val) \
-    omcache_decrement((mc), omc_cc_to_cuc(key), (key_len), (offset), (initial), (expiration), (val), 0)
-#define memcached_delete(mc,key,key_len,hold) \
-    ({ omc_unused_var(hold); omcache_delete((mc), omc_cc_to_cuc(key), (key_len), 0); })
-#define memcached_add(mc,key,key_len,val,val_len,exp,flags) \
-    omcache_add((mc), omc_cc_to_cuc(key), (key_len), omc_cc_to_cuc(val), (val_len), (exp), (flags), 0)
-#define memcached_set(mc,key,key_len,val,val_len,exp,flags) \
-    omcache_set((mc), omc_cc_to_cuc(key), (key_len), omc_cc_to_cuc(val), (val_len), (exp), (flags), 0, 0)
-#define memcached_replace(mc,key,key_len,val,val_len,exp,flags) \
-    omcache_replace((mc), omc_cc_to_cuc(key), (key_len), omc_cc_to_cuc(val), (val_len), (exp), (flags), 0)
+#define memcached_increment(mc,key,key_len,offset,val) \
+    omcache_increment((mc), omc_cc_to_cuc(key), (key_len), (offset), 0, OMCACHE_DELTA_NO_ADD, (val), 0)
+#define memcached_increment_with_initial(mc,key,key_len,offset,initial,expire,val) \
+    omcache_increment((mc), omc_cc_to_cuc(key), (key_len), (offset), (initial), (expire), (val), 0)
+#define memcached_decrement(mc,key,key_len,offset,val) \
+    omcache_decrement((mc), omc_cc_to_cuc(key), (key_len), (offset), 0, OMCACHE_DELTA_NO_ADD, (val), 0)
+#define memcached_decrement_with_initial(mc,key,key_len,offset,initial,expire,val) \
+    omcache_decrement((mc), omc_cc_to_cuc(key), (key_len), (offset), (initial), (expire), (val), 0)
+#define memcached_add(mc,key,key_len,val,val_len,expire,flags) \
+    omcache_add((mc), omc_cc_to_cuc(key), (key_len), omc_cc_to_cuc(val), (val_len), (expire), (flags), 0)
+#define memcached_set(mc,key,key_len,val,val_len,expire,flags) \
+    omcache_set((mc), omc_cc_to_cuc(key), (key_len), omc_cc_to_cuc(val), (val_len), (expire), (flags), 0, 0)
+#define memcached_replace(mc,key,key_len,val,val_len,expire,flags) \
+    omcache_replace((mc), omc_cc_to_cuc(key), (key_len), omc_cc_to_cuc(val), (val_len), (expire), (flags), 0)
+#define memcached_touch(mc,key,key_len,expire) \
+    omcache_touch((mc), omc_cc_to_cuc(key), (key_len), (expire))
+// NOTE: memcached protocol doesn't have expiration for delete
+#define memcached_delete(mc,key,key_len,expire) \
+    ({ omc_unused_var(expire); omcache_delete((mc), omc_cc_to_cuc(key), (key_len), 0); })
+// NOTE: memcached protocol doesn't have expiration or flags for append and prepend
+#define memcached_append(mc,key,key_len,val,val_len,expire,flags) \
+    ({  omc_unused_var(expire); omc_unused_var(flags); \
+        omcache_append((mc), omc_cc_to_cuc(key), (key_len), omc_cc_to_cuc(val), (val_len), 0, 0); })
+#define memcached_prepend(mc,key,key_len,val,val_len,expire,flags) \
+    ({  omc_unused_var(expire); omc_unused_var(flags); \
+        omcache_prepend((mc), omc_cc_to_cuc(key), (key_len), omc_cc_to_cuc(val), (val_len), 0, 0); })
+
 #define memcached_get(mc,key,key_len,r_len,flags,rc) \
     ({  const unsigned char *val_; \
         *rc = omcache_get((mc), omc_cc_to_cuc(key), (key_len), &val_, (r_len), (flags), NULL, -1); \
@@ -98,10 +113,11 @@ typedef const char *memcached_server_distribution_t;
 #define memcached_stat_get_value(mc,stat,key,rc) \
     ({ *(rc) = MEMCACHED_FAILURE; NULL; })
 
+// various omcache_set_* apis need to be used instead of behaviors
 #define memcached_behavior_set(m,k,v) MEMCACHED_FAILURE
+
+// omcache_get_multi and omcache_io need to be called instead of these
 #define memcached_mget(mc,keys,key_lens,arr_len) MEMCACHED_FAILURE
 #define memcached_fetch(mc,key,key_len,val_len,flags,rc) ({ *rc = MEMCACHED_FAILURE; NULL; })
-#define memcached_append(mc,key,key_len,val,val_len,expire,flags) MEMCACHED_FAILURE
-#define memcached_prepend(mc,key,key_len,val,val_len,expire,flags) MEMCACHED_FAILURE
 
 #endif // !_OMCACHE_LIBMEMCACHED_H
