@@ -33,7 +33,7 @@
 
 
 #define omc_log(pri,fmt,...) ({ \
-    if (mc->log_cb && pri <= mc->log_level) { \
+    if (mc->log_cb && (pri) <= mc->log_level) { \
       char *log_msg_; \
       if (asprintf(&log_msg_, "[%.03f] omcache/%s:%d: " fmt, \
                    (omc_msec() - mc->init_msec) / 1000.0, __func__, __LINE__, __VA_ARGS__) > 0) { \

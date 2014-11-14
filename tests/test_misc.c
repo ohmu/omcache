@@ -52,10 +52,22 @@ START_TEST(test_md5)
 }
 END_TEST
 
+START_TEST(test_no_logging)
+{
+  omcache_t *oc = ot_init_omcache(2, LOG_DEBUG);
+  ck_omcache_ok(omcache_set_log_callback(oc, 999, NULL, NULL));
+  ck_omcache_ok(omcache_noop(oc, 0, -1));
+  ck_omcache_ok(omcache_noop(oc, 1, -1));
+  omcache_free(oc);
+}
+END_TEST
+
+
 Suite *ot_suite_misc(void)
 {
   Suite *s = suite_create("Misc");
   ot_tcase_add(s, test_strerror);
   ot_tcase_add(s, test_md5);
+  ot_tcase_add(s, test_no_logging);
   return s;
 }
