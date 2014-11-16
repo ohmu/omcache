@@ -476,6 +476,10 @@ int omcache_flush_all(omcache_t *mc, time_t expiration,
  * @param value New value to store in memcached.
  * @param value_len Length of the value.
  * @param expiration Expire the value after this time.
+ *                   Memcache server interprets this as relative to current
+ *                   time if the value is less than 60*60*24*30 (30 days)
+ *                   and as an absolute unix timestamp (seconds since 1970)
+ *                   if it's higher than that.
  * @param flags Flags to associate with the stored object.
  * @param cas CAS value for synchronization, if non-zero and an object with
  *            a different value already exists in memcached the request will
@@ -502,6 +506,7 @@ int omcache_set(omcache_t *mc,
  * @param value New value to store in memcached.
  * @param value_len Length of the value.
  * @param expiration Expire the value after this time.
+ *                   See omcache_set() for details.
  * @param flags Flags to associate with the stored object.
  * @param timeout_msec Maximum number of milliseconds to block while waiting
  *                     for I/O to complete.  Zero means no blocking at all
@@ -525,6 +530,7 @@ int omcache_add(omcache_t *mc,
  * @param value New value to store in memcached.
  * @param value_len Length of the value.
  * @param expiration Expire the value after this time.
+ *                   See omcache_set() for details.
  * @param flags Flags to associate with the stored object.
  * @param timeout_msec Maximum number of milliseconds to block while waiting
  *                     for I/O to complete.  Zero means no blocking at all
@@ -591,6 +597,7 @@ int omcache_prepend(omcache_t *mc,
  * @param expiration Expire the value after this time.  If set to
  *                   OMCACHE_DELTA_NO_ADD the counter is not initialized in
  *                   case it does not yet exist in the backend.
+ *                   See omcache_set() for details.
  * @param value Counter value after the increment operation.
  * @param timeout_msec Maximum number of milliseconds to block while waiting
  *                     for I/O to complete.  Zero means no blocking at all
@@ -616,6 +623,7 @@ int omcache_increment(omcache_t *mc,
  * @param expiration Expire the value after this time.  If set to
  *                   OMCACHE_DELTA_NO_ADD the counter is not initialized in
  *                   case it does not yet exist in the backend.
+ *                   See omcache_set() for details.
  * @param value Counter value after the decrement operation.
  * @param timeout_msec Maximum number of milliseconds to block while waiting
  *                     for I/O to complete.  Zero means no blocking at all
@@ -653,6 +661,7 @@ int omcache_delete(omcache_t *mc,
  * @param key Key to touch.
  * @param key_len Length of the key.
  * @param expiration Expire the value after this time.
+ *                   See omcache_set() for details.
  * @param timeout_msec Maximum number of milliseconds to block while waiting
  *                     for I/O to complete.  Zero means no blocking at all
  *                     and a negative value blocks indefinitely.
@@ -714,6 +723,68 @@ int omcache_get_multi(omcache_t *mc,
                       size_t *key_lens,
                       size_t key_count,
                       omcache_req_t *reqs,
+                      size_t *req_count,
+                      omcache_value_t *values,
+                      size_t *value_count,
+                      int32_t timeout_msec);
+
+/**
+ * Look up a key from a backend and update its expiration time.
+ * @param mc OMcache handle.
+ * @param key Key to look up.
+ * @param key_len Length of the key.
+ * @param value Pointer to store the new value in, may be NULL.
+ * @param value_len Pointer to store the length of the value in.
+ * @param expiration Expire the key after this time.
+ *                   See omcache_set() for details.
+ * @param flags Pointer to store the retrieved object's flags in.
+ * @param cas Pointer to store the retrieved object's CAS value in.
+ * @param timeout_msec Maximum number of milliseconds to block while waiting
+ *                     for I/O to complete.  Zero means no blocking at all
+ *                     and a negative value blocks indefinitely.
+ * @return OMCACHE_OK if data was successfully written;
+ *         OMCACHE_NOT_FOUND the key was not set in the backend.
+ *         OMCACHE_AGAIN value was not yet retrieved, call omcache_io()
+ *                       to get it later.
+ */
+int omcache_gat(omcache_t *mc,
+                const unsigned char *key, size_t key_len,
+                const unsigned char **value, size_t *value_len,
+                time_t expiration,
+                uint32_t *flags, uint64_t *cas,
+                int32_t timeout_msec);
+
+/**
+ * Look up multiple keys from the backends and update their expiration
+ * times.
+ * @param mc OMcache handle.
+ * @param keys Array of pointers to keys to look up.
+ * @param key_lens Array of lengths of keys.
+ * @param expirations Array of new expiration times for the keys.
+ *                    See omcache_set() for details.
+ * @param key_count Number of pointers in keys array.
+ * @param reqs Array of request structures to store pending requests in.
+ *             If this function can't complete all lookups in a single round
+ *             of I/O operations the pending requests are stored in this
+ *             array which can be passed to omcache_io() to complete the
+ *             remaining requests.
+ * @param req_count Number of requests in reqs array.  Will be zeroed once
+ *                  all requests have been handled.
+ * @param values Array to store responses in, handled like in omcache_io().
+ * @param value_count values length, handled like in omcache_io().
+ * @param timeout_msec Maximum number of milliseconds to block while waiting
+ *                     for I/O to complete.  Zero means no blocking at all
+ *                     and a negative value blocks indefinitely.
+ * @return OMCACHE_OK All requests were handled;
+ *         OMCACHE_AGAIN Not all values were retrieved,
+ *                       call omcache_io() to retrieve them.
+ */
+int omcache_gat_multi(omcache_t *mc,
+                      const unsigned char **keys,
+                      size_t *key_lens,
+                      time_t *expirations,
+                      size_t key_count,
+                      omcache_req_t *requests,
                       size_t *req_count,
                       omcache_value_t *values,
                       size_t *value_count,

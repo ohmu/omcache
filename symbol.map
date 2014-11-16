@@ -54,4 +54,6 @@ OMCACHE_0.2
     omcache_append;
     omcache_prepend;
     omcache_touch;
+    omcache_gat;
+    omcache_gat_multi;
 } OMCACHE_0.1;

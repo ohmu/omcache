@@ -15,7 +15,9 @@
 #include <string.h>
 #include <time.h>
 
-#include "omcache_priv.h"
+// Note: commands.c only uses the "public" omcache api
+#include "omcache.h"
+#include "memcached_protocol_binary.h"
 
 #define QCMD(k) (timeout_msec ? k : k ## Q)
 
@@ -247,15 +249,17 @@ int omcache_touch(omcache_t *mc,
   return omcache_command_status(mc, req, timeout_msec);
 }
 
-int omcache_get_multi(omcache_t *mc,
-                      const unsigned char **keys,
-                      size_t *key_lens,
-                      size_t key_count,
-                      omcache_req_t *requests,
-                      size_t *req_count,
-                      omcache_value_t *values,
-                      size_t *value_count,
-                      int32_t timeout_msec)
+static int omc_get_multi_cmd(omcache_t *mc,
+                             protocol_binary_command opcode,
+                             const unsigned char **keys,
+                             size_t *key_lens,
+                             uint32_t *be_expirations,
+                             size_t key_count,
+                             omcache_req_t *requests,
+                             size_t *req_count,
+                             omcache_value_t *values,
+                             size_t *value_count,
+                             int32_t timeout_msec)
 {
   if (req_count == NULL || *req_count < key_count)
     return OMCACHE_INVALID;
@@ -267,24 +271,66 @@ int omcache_get_multi(omcache_t *mc,
   for (size_t i = 0; i < key_count; i ++)
     {
       requests[i].server_index = -1;
-      requests[i].header.opcode = PROTOCOL_BINARY_CMD_GETKQ;
+      requests[i].header.opcode = opcode;
       requests[i].header.keylen = htobe16(key_lens[i]);
-      requests[i].header.bodylen = htobe32(key_lens[i]);
+      if (opcode == PROTOCOL_BINARY_CMD_GAT || opcode == PROTOCOL_BINARY_CMD_GATQ ||
+          opcode == PROTOCOL_BINARY_CMD_GATK || opcode == PROTOCOL_BINARY_CMD_GATKQ)
+        {
+          requests[i].header.extlen = sizeof(uint32_t);
+          requests[i].extra = &be_expirations[i];
+        }
+      requests[i].header.bodylen = htobe32(key_lens[i] + requests[i].header.extlen);
       requests[i].key = keys[i];
     }
   return omcache_command(mc, requests, req_count, values, value_count, timeout_msec);
 }
 
-int omcache_get(omcache_t *mc,
-                const unsigned char *key, size_t key_len,
-                const unsigned char **valuep, size_t *value_len,
-                uint32_t *flags, uint64_t *cas,
-                int32_t timeout_msec)
+int omcache_get_multi(omcache_t *mc,
+                      const unsigned char **keys,
+                      size_t *key_lens,
+                      size_t key_count,
+                      omcache_req_t *requests,
+                      size_t *req_count,
+                      omcache_value_t *values,
+                      size_t *value_count,
+                      int32_t timeout_msec)
+{
+  return omc_get_multi_cmd(mc, PROTOCOL_BINARY_CMD_GETKQ,
+                           keys, key_lens, NULL, key_count,
+                           requests, req_count, values, value_count,
+                           timeout_msec);
+}
+
+int omcache_gat_multi(omcache_t *mc,
+                      const unsigned char **keys,
+                      size_t *key_lens,
+                      time_t *expirations,
+                      size_t key_count,
+                      omcache_req_t *requests,
+                      size_t *req_count,
+                      omcache_value_t *values,
+                      size_t *value_count,
+                      int32_t timeout_msec)
+{
+  uint32_t be_expirations[key_count];
+  for (size_t i = 0; i < key_count; i ++)
+   be_expirations[i] = htobe32(expirations[i]);
+  return omc_get_multi_cmd(mc, PROTOCOL_BINARY_CMD_GATKQ,
+                           keys, key_lens, be_expirations, key_count,
+                           requests, req_count, values, value_count,
+                           timeout_msec);
+}
+
+static int omc_get_cmd(omcache_t *mc, protocol_binary_command opcode,
+                       const unsigned char *key, size_t key_len,
+                       const unsigned char **valuep, size_t *value_len,
+                       uint32_t be_expiration, uint32_t *flags, uint64_t *cas,
+                       int32_t timeout_msec)
 {
   omcache_req_t req;
   omcache_value_t value = {0};
   size_t req_count = 1, value_count = valuep ? 1 : 0;
-  int ret = omcache_get_multi(mc, &key, &key_len, 1, &req, &req_count,
+  int ret = omc_get_multi_cmd(mc, opcode, &key, &key_len, &be_expiration, 1, &req, &req_count,
                               valuep ? &value : NULL, valuep ? &value_count : NULL,
                               timeout_msec);
   if (value_count == 0 && ret == OMCACHE_OK)
@@ -298,4 +344,26 @@ int omcache_get(omcache_t *mc,
   if (cas)
     *cas = value.cas;
   return (ret == OMCACHE_OK && value_count) ? value.status : ret;
+}
+
+int omcache_get(omcache_t *mc,
+                const unsigned char *key, size_t key_len,
+                const unsigned char **value, size_t *value_len,
+                uint32_t *flags, uint64_t *cas,
+                int32_t timeout_msec)
+{
+  return omc_get_cmd(mc, PROTOCOL_BINARY_CMD_GETKQ, key, key_len,
+                     value, value_len, 0, flags, cas, timeout_msec);
+}
+
+int omcache_gat(omcache_t *mc,
+                const unsigned char *key, size_t key_len,
+                const unsigned char **value, size_t *value_len,
+                time_t expiration,
+                uint32_t *flags, uint64_t *cas,
+                int32_t timeout_msec)
+{
+  return omc_get_cmd(mc, PROTOCOL_BINARY_CMD_GATKQ, key, key_len,
+                     value, value_len, htobe32(expiration),
+                     flags, cas, timeout_msec);
 }

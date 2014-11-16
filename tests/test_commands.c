@@ -222,6 +222,38 @@ START_TEST(test_touch)
 }
 END_TEST
 
+START_TEST(test_gat)
+{
+  const unsigned char key[] = "test_gat";
+  size_t key_len = sizeof(key) - 1;
+  const unsigned char *get_val;
+  size_t val_len;
+  uint64_t cas;
+  omcache_t *oc = ot_init_omcache(2, LOG_INFO);
+
+  // set with 1 second timeout, sleep and try gat, it should fail as the value already expired
+  ck_omcache_ok(omcache_set(oc, key, key_len, (cuc *) "asdf", 4, 1, 0, 0, TIMEOUT));
+  usleep(1100000);
+  ck_omcache(omcache_gat(oc, key, key_len, &get_val, &val_len, 4, NULL, &cas, TIMEOUT), OMCACHE_NOT_FOUND);
+
+  // set with 1 second timeout, gat immediately, it should work as the value has not expired yet
+  ck_omcache_ok(omcache_set(oc, key, key_len, (cuc *) "asdf", 4, 1, 0, 0, TIMEOUT));
+  ck_omcache_ok(omcache_gat(oc, key, key_len, &get_val, &val_len, 2, NULL, &cas, TIMEOUT));
+  ck_assert_uint_eq(val_len, 4);
+  ck_assert_int_eq(memcmp(get_val, "asdf", 4), 0);
+  // now sleep and check that the value is still there (gat should've extended its validity)
+  usleep(1500000);
+  ck_omcache_ok(omcache_get(oc, key, key_len, &get_val, &val_len, NULL, &cas, TIMEOUT));
+  ck_assert_uint_eq(val_len, 4);
+  ck_assert_int_eq(memcmp(get_val, "asdf", 4), 0);
+  // sleep some more, the value should have expired after this
+  usleep(1000000);
+  ck_omcache(omcache_gat(oc, key, key_len, &get_val, &val_len, 4, NULL, &cas, TIMEOUT), OMCACHE_NOT_FOUND);
+
+  omcache_free(oc);
+}
+END_TEST
+
 START_TEST(test_increment_and_decrement)
 {
   const unsigned char key[] = "test_increment_and_decrement";
@@ -369,9 +401,11 @@ static void test_response_callback_cb(omcache_t *mc __attribute__((unused)),
                                       omcache_value_t *result, void *context)
 {
   size_t *values_found_p = (size_t *) context;
+  // NOTE: don't compare keys, memcached's GATKQ handling doesn't return
+  // keys currently https://github.com/memcached/memcached/pull/85
   if (result->status == OMCACHE_OK &&
-      result->key_len >= sizeof("test_response_callback_") &&
-      memcmp(result->key, "test_response_callback_", sizeof("test_response_callback_") - 1) == 0)
+      result->data_len >= sizeof("test_response_callback_") &&
+      memcmp(result->data, "test_response_callback_", sizeof("test_response_callback_") - 1) == 0)
     {
       *values_found_p = (*values_found_p) + 1;
     }
@@ -403,9 +437,20 @@ START_TEST(test_response_callback)
   while (req_count > 0)
     ck_omcache_ok(omcache_io(oc, reqs, &req_count, NULL, NULL, 5000));
   ck_assert_int_eq(values_found, 32);
+
+  // now do the same thing with GAT (get-and-touch)
+  req_count = 64;
+  values_found = 0;
+  time_t expirations[64];
+  for (int i = 0; i < 64; i ++)
+    expirations[i] = 10 + i;
+  ck_omcache_ok(omcache_gat_multi(oc, (cuc **) keys, key_lens, expirations, 64, reqs, &req_count, NULL, NULL, 5000));
+  while (req_count > 0)
+    ck_omcache_ok(omcache_io(oc, reqs, &req_count, NULL, NULL, 5000));
+  ck_assert_int_eq(values_found, 32);
+
   for (int i = 0; i < 64; i ++)
     free(keys[i]);
-
   omcache_free(oc);
 }
 END_TEST
@@ -422,6 +467,7 @@ Suite *ot_suite_commands(void)
   ot_tcase_add(s, test_add_and_replace);
   ot_tcase_add(s, test_append_and_prepend);
   tcase_set_timeout(ot_tcase_add(s, test_touch), 10);
+  tcase_set_timeout(ot_tcase_add(s, test_gat), 10);
   ot_tcase_add(s, test_increment_and_decrement);
   ot_tcase_add(s, test_req_id_wraparound);
   ot_tcase_add(s, test_buffering);
