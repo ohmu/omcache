@@ -246,9 +246,13 @@ START_TEST(test_gat)
   ck_omcache_ok(omcache_get(oc, key, key_len, &get_val, &val_len, NULL, &cas, TIMEOUT));
   ck_assert_uint_eq(val_len, 4);
   ck_assert_int_eq(memcmp(get_val, "asdf", 4), 0);
-  // sleep some more, the value should have expired after this
-  usleep(1000000);
-  ck_omcache(omcache_gat(oc, key, key_len, &get_val, &val_len, 4, NULL, &cas, TIMEOUT), OMCACHE_NOT_FOUND);
+  // NOTE: touch expiration time setting is broken in memcached <1.4.13-16-g045da59
+  if (strcmp(ot_memcached_version(), "1.4.13") > 0)
+    {
+      // sleep some more, the value should have expired after this
+      usleep(1000000);
+      ck_omcache(omcache_gat(oc, key, key_len, &get_val, &val_len, 4, NULL, &cas, TIMEOUT), OMCACHE_NOT_FOUND);
+    }
 
   omcache_free(oc);
 }

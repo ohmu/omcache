@@ -50,6 +50,7 @@
 typedef const unsigned char cuc;
 
 omcache_t *ot_init_omcache(int server_count, int log_level);
+const char *ot_memcached_version(void);
 int ot_get_memcached(size_t server_index);
 int ot_start_memcached(const char *addr, pid_t *pid);
 int ot_stop_memcached(int port);

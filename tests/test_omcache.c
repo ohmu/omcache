@@ -9,9 +9,11 @@
  *
  */
 
+#include <fcntl.h>
 #include <signal.h>
 #include <time.h>
 #include <unistd.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 
 #include "test_omcache.h"
@@ -24,6 +26,44 @@ struct mc_info_s {
 
 static struct mc_info_s memcacheds[1000];
 static size_t memcached_count;
+static char memcached_version[100];
+
+const char *ot_memcached_version(void)
+{
+  if (memcached_version[0])
+    return memcached_version;
+  int iop[2];
+  pipe(iop);
+  pid_t pid = fork();
+  if (pid == 0)
+    {
+      const char *mc_path = getenv("MEMCACHED_PATH");
+      if (mc_path == NULL)
+        mc_path = "/usr/bin/memcached";
+      close(0);
+      close(1);
+      close(2);
+      int fd = open("/dev/null", O_RDWR);
+      dup2(fd, 0);
+      dup2(fd, 2);
+      close(fd);
+      dup2(iop[1], fileno(stdout));
+      close(iop[1]);
+      execl(mc_path, "memcached", "-h", NULL);
+      perror("execl");
+      _exit(1);
+    }
+  read(iop[0], memcached_version, sizeof(memcached_version));
+  close(iop[0]);
+  close(iop[1]);
+  memcached_version[sizeof(memcached_version) - 1] = 0;
+  char *p = strchr(memcached_version, '\n');
+  if (p)
+    *p = 0;
+  if (memcmp(memcached_version, "memcached ", sizeof("memcached ") - 1) == 0)
+    memmove(memcached_version, memcached_version + sizeof("memcached ") - 1, 20);
+  return memcached_version;
+}
 
 int ot_get_memcached(size_t server_index)
 {
