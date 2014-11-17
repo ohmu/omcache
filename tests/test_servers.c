@@ -21,8 +21,11 @@ START_TEST(test_server_list)
   // NOTE: omcache sorts server list internally, host and portnames are not
   // checked when server list is created, they're resolved when we actually
   // try to connect so invalid entries can be pushed to the list
-  ck_omcache_ok(omcache_set_servers(oc, "8.8.8.8:22,,   127.0.0.1:11300  , 10.0.0.0, 10.10.10.10:11111"));
-  ck_omcache_ok(omcache_set_servers(oc, "127.0.0.1:11300, 10.0.0.0, 10.10.10.10:11111, 192.168.255.255:99999"));
+  ck_omcache_ok(omcache_set_servers(oc,
+    "foo:bar, [::1]:11211, [fe80::5054:ff:fefb:beef], 8.8.8.8:22,,   "
+    "127.0.0.1:11300  , 10.0.0.0, 10.10.10.10:11111"));
+  ck_omcache_ok(omcache_set_servers(oc,
+    "127.0.0.1:11300, 10.0.0.0, [::1]:11111, 192.168.255.255:99999"));
   for (int i = 0; i < 4; i ++)
     {
       omcache_server_info_t *sinfo = omcache_server_info(oc, i);
@@ -36,16 +39,16 @@ START_TEST(test_server_list)
           ck_assert_str_eq(sinfo->hostname, "10.0.0.0");
           break;
         case 1:
-          ck_assert_int_eq(sinfo->port, 11111);
-          ck_assert_str_eq(sinfo->hostname, "10.10.10.10");
-          break;
-        case 2:
           ck_assert_int_eq(sinfo->port, 11300);
           ck_assert_str_eq(sinfo->hostname, "127.0.0.1");
           break;
-        case 3:
+        case 2:
           ck_assert_int_eq(sinfo->port, 99999);
           ck_assert_str_eq(sinfo->hostname, "192.168.255.255");
+          break;
+        case 3:
+          ck_assert_int_eq(sinfo->port, 11111);
+          ck_assert_str_eq(sinfo->hostname, "::1");
           break;
         default:
           ck_assert(false);
