@@ -1398,7 +1398,6 @@ int omcache_command(omcache_t *mc,
                     int32_t timeout_msec)
 {
   int ret = OMCACHE_OK;
-  int buffered = 0;
   size_t req_count = *req_countp;
   *req_countp = 0;
 
@@ -1528,8 +1527,6 @@ int omcache_command(omcache_t *mc,
                               iov_req_count, rps->count - ri - 1);
                   break;
                 }
-              else if (ret == OMCACHE_BUFFERED)
-                buffered ++;
               srv_reqs_sent = ri + 1;
               iov_idx = 0;
               iov_req_count = 0;
@@ -1551,7 +1548,11 @@ int omcache_command(omcache_t *mc,
       // no response requested or data wasn't sent. we're done.
       if (value_count)
         *value_count = 0;
-      if (ret == OMCACHE_OK && buffered > 0)
+      // we'll say "BUFFERED" if we haven't read the response even if we've
+      // been able to write the bytes to the backend; BUFFERED means that
+      // the request was handled successfully by our end but we don't know
+      // if it was processed yet and if it was, what was its status.
+      if (ret == OMCACHE_OK)
         ret = OMCACHE_BUFFERED;
       return ret;
     }

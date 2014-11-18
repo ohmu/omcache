@@ -122,7 +122,7 @@ START_TEST(test_all_backends_fail)
   ck_omcache_ok(omcache_noop(oc, 1, 1000));
 
   for (size_t i = 0; i < item_count; i ++)
-    ck_omcache_ok(omcache_set(oc, keydata + i, 100, keydata + i, 100, 0, 0, 0, 0));
+    ck_omcache(omcache_set(oc, keydata + i, 100, keydata + i, 100, 0, 0, 0, 0), OMCACHE_BUFFERED);
   ck_omcache_ok(omcache_io(oc, NULL, NULL, NULL, NULL, 5000));
   for (size_t i = 0; i < item_count; i ++)
     {
