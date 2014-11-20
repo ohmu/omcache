@@ -352,7 +352,7 @@ int omcache_get(omcache_t *mc,
                 uint32_t *flags, uint64_t *cas,
                 int32_t timeout_msec)
 {
-  return omc_get_cmd(mc, PROTOCOL_BINARY_CMD_GETKQ, key, key_len,
+  return omc_get_cmd(mc, QCMD(PROTOCOL_BINARY_CMD_GETK), key, key_len,
                      value, value_len, 0, flags, cas, timeout_msec);
 }
 
@@ -363,7 +363,7 @@ int omcache_gat(omcache_t *mc,
                 uint32_t *flags, uint64_t *cas,
                 int32_t timeout_msec)
 {
-  return omc_get_cmd(mc, PROTOCOL_BINARY_CMD_GATKQ, key, key_len,
+  return omc_get_cmd(mc, QCMD(PROTOCOL_BINARY_CMD_GATK), key, key_len,
                      value, value_len, htobe32(expiration),
                      flags, cas, timeout_msec);
 }
