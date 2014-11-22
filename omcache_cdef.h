@@ -50,7 +50,7 @@ typedef struct omcache_req_s {
         uint32_t opaque;        ///< Request identifier, set by OMcache
         uint64_t cas;           ///< CAS value for synchronization
     } header;                   ///< Memcache binary protocol header struct
-    void *extra;                ///< Extra structured data sent for some
+    const void *extra;          ///< Extra structured data sent for some
                                 ///  request types
     const unsigned char *key;   ///< Object key
     const unsigned char *data;  ///< Object value
