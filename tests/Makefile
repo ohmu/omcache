@@ -9,6 +9,11 @@ WITH_CFLAGS += -DWITH_LIBMEMCACHED
 WITH_LIBS += -lmemcached
 endif
 
+ifeq ($(WITHOUT_ASYNCNS),)
+WITH_CFLAGS += -DWITH_ASYNCNS
+WITH_LIBS += -lasyncns
+endif
+
 all: $(TEST)
 
 check: $(TEST) ../libomcache.so

@@ -9,9 +9,6 @@ cluster.  OMcache specifically tries to avoid ABI brekage and does not mask
 any signals or call blocking functions to help integrating it into other
 solutions.
 
-FIXME: Currently OMcache uses getaddrinfo for name resolution which blocks,
-pass IP addresses for OMcache to avoid blocking for now.
-
 ::
 
                                            ,##,

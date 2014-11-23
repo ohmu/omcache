@@ -6,7 +6,7 @@ Group:          System Environment/Libraries
 URL:            https://github.com/saaros/omcache/
 License:        ASL 2.0
 Source0:        omcache-rpm-src.tar.gz
-BuildRequires:  check-devel
+BuildRequires:  check-devel, libasyncns-devel
 
 %description
 OMcache is a low level C library for accessing memcached servers.  The goals

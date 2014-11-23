@@ -28,6 +28,10 @@
 
 #include "omcache_priv.h"
 
+#ifdef WITH_ASYNCNS
+#include <asyncns.h>
+#endif // WITH_ASYNCNS
+
 #define max(a,b) ({__typeof__(a) a_ = (a), b_ = (b); a_ > b_ ? a_ : b_; })
 #define min(a,b) ({__typeof__(a) a_ = (a), b_ = (b); a_ < b_ ? a_ : b_; })
 
@@ -69,6 +73,10 @@ typedef struct omc_srv_s
   char *port;
   struct addrinfo *addrs;
   struct addrinfo *addrp;
+#ifdef WITH_ASYNCNS
+  asyncns_query_t *nsq;
+  bool ans_addrs;
+#endif // WITH_ASYNCNS
   int64_t last_gai;
   int64_t conn_timeout;
   uint32_t last_req_recvd;
@@ -105,6 +113,10 @@ struct omcache_s
   struct pollfd *server_polls;
   ssize_t server_count;
   omc_int_hash_table_t *fd_table;
+#ifdef WITH_ASYNCNS
+  asyncns_t *ans;
+  int ans_fd;
+#endif // WITH_ASYNCNS
 
   // distribution
   omc_ketama_t *ketama;
@@ -167,6 +179,10 @@ omcache_t *omcache_init(void)
   mc->reconnect_timeout_msec = 10 * 1000;
   mc->dead_timeout_msec = 10 * 1000;
   mc->dist_method = &omcache_dist_libmemcached_ketama;
+#ifdef WITH_ASYNCNS
+  mc->ans = asyncns_new(1);
+  mc->ans_fd = asyncns_fd(mc->ans);
+#endif // WITH_ASYNCNS
   return mc;
 }
 
@@ -189,6 +205,9 @@ int omcache_free(omcache_t *mc)
   free(mc->ketama);
   omc_int_hash_table_free(mc->fd_table);
   omc_hash_table_free(mc->lookup.table);
+#ifdef WITH_ASYNCNS
+  asyncns_free(mc->ans);
+#endif // WITH_ASYNCNS
   memset(mc, 'M', sizeof(*mc));
   free(mc);
   return OMCACHE_OK;
@@ -284,6 +303,30 @@ static omc_srv_t *omc_srv_init(const char *hostname)
   return srv;
 }
 
+static void omc_srv_free_addrs(omcache_t *mc __attribute__((unused)), omc_srv_t *srv)
+{
+#ifdef WITH_ASYNCNS
+  if (srv->ans_addrs)
+    {
+      asyncns_freeaddrinfo(srv->addrs);
+      srv->ans_addrs = false;
+      srv->addrs = NULL;
+      srv->addrp = NULL;
+    }
+  if (srv->nsq)
+    {
+      asyncns_cancel(mc->ans, srv->nsq);
+      srv->nsq = NULL;
+    }
+#endif // WITH_ASYNCNS
+  if (srv->addrs)
+    {
+      freeaddrinfo(srv->addrs);
+      srv->addrs = NULL;
+      srv->addrp = NULL;
+    }
+}
+
 static int omc_srv_free(omcache_t *mc, omc_srv_t *srv)
 {
   if (srv->sock >= 0)
@@ -293,8 +336,7 @@ static int omc_srv_free(omcache_t *mc, omc_srv_t *srv)
       omc_int_hash_table_del(mc->fd_table, srv->sock);
       srv->sock = -1;
     }
-  if (srv->addrs)
-    freeaddrinfo(srv->addrs);
+  omc_srv_free_addrs(mc, srv);
   free(srv->send_buffer.base);
   free(srv->recv_buffer.base);
   free(srv->hostname);
@@ -457,6 +499,9 @@ int omcache_set_response_callback(omcache_t *mc, omcache_response_callback_func 
 struct pollfd *omcache_poll_fds(omcache_t *mc, int *nfds, int *poll_timeout)
 {
   int n, i;
+#ifdef WITH_ASYNCNS
+  bool poll_ans = false;
+#endif // WITH_ASYNCNS
   int64_t now = omc_msec();
   *poll_timeout = mc->dead_timeout_msec;
 
@@ -495,12 +540,26 @@ struct pollfd *omcache_poll_fds(omcache_t *mc, int *nfds, int *poll_timeout)
               srv->conn_timeout = 1;
               *poll_timeout = 1;
             }
-          if (srv->sock < 0)
-            continue;
-          mc->server_polls[n].fd = srv->sock;
-          mc->server_polls[n].revents = 0;
-          n ++;
+          if (srv->sock >= 0)
+            {
+              mc->server_polls[n].fd = srv->sock;
+              mc->server_polls[n].revents = 0;
+              n ++;
+            }
         }
+#ifdef WITH_ASYNCNS
+      if (srv->nsq && !poll_ans)
+        {
+          // NOTE: we don't allocate extra space in 'server_polls' for async
+          // ns polling because we can't poll for both the server and for
+          // async ns resuls for it.
+          omc_srv_debug(srv, "polling asyncns fd %d for POLLIN", mc->ans_fd);
+          poll_ans = true;
+          mc->server_polls[n].fd = mc->ans_fd;
+          mc->server_polls[n].events = POLLIN;
+          mc->server_polls[n++].revents = 0;
+        }
+#endif // WITH_ASYNCNS
     }
   *nfds = n;
   return mc->server_polls;
@@ -610,10 +669,7 @@ static void omc_srv_disable(omcache_t *mc, omc_srv_t *srv)
   srv->retry_at = omc_msec() + mc->reconnect_timeout_msec;
   srv->disabled = true;
   // clear addrinfo cache to force fresh addrs to be used on retry
-  if (srv->addrs)
-    freeaddrinfo(srv->addrs);
-  srv->addrs = NULL;
-  srv->addrp = NULL;
+  omc_srv_free_addrs(mc, srv);
 }
 
 static void
@@ -658,15 +714,34 @@ static int omc_srv_connect(omcache_t *mc, omc_srv_t *srv)
     {
       int err;
 
+#ifdef WITH_ASYNCNS
+      if (srv->nsq)
+        {
+          err = asyncns_getaddrinfo_done(mc->ans, srv->nsq, &srv->addrs);
+          if (err != EAI_AGAIN)
+            srv->nsq = NULL;
+          if (err && (err != EAI_AGAIN || now - srv->last_gai >= mc->connect_timeout_msec))
+            {
+              omc_srv_log(LOG_WARNING, srv, "asyncns_getaddrinfo: %s", gai_strerror(err));
+              omc_srv_reset(mc, srv, "asyncns_getaddrinfo failed");
+              omc_srv_disable(mc, srv);
+              return OMCACHE_SERVER_FAILURE;
+            }
+          else if (err == EAI_AGAIN)
+            {
+              return OMCACHE_AGAIN;
+            }
+          srv->ans_addrs = true;
+          srv->addrp = srv->addrs;
+          srv->last_gai = now;
+        }
+#endif // WITH_ASYNCNS
+
       // refresh the hosts addresses if we don't have them yet or if we last
       // refreshed them before we were last connected
       if (srv->addrs == NULL || srv->last_io_success > srv->last_gai)
         {
-          if (srv->addrs)
-            {
-              freeaddrinfo(srv->addrs);
-              srv->addrs = NULL;
-            }
+          omc_srv_free_addrs(mc, srv);
           struct addrinfo hints;
           memset(&hints, 0, sizeof(hints));
           hints.ai_socktype = SOCK_STREAM;
@@ -678,9 +753,16 @@ static int omc_srv_connect(omcache_t *mc, omc_srv_t *srv)
           err = getaddrinfo(srv->hostname, srv->port, &hints, &srv->addrs);
           if (err == EAI_NONAME)
             {
-              // XXX: this can block, use libasyncns or libares-c?
               hints.ai_flags = AI_ADDRCONFIG;
+#ifdef WITH_ASYNCNS
+              srv->nsq = asyncns_getaddrinfo(mc->ans, srv->hostname, srv->port, &hints);
+              omc_srv_log(LOG_WARNING, srv, "async getaddrinfo: %p", srv->nsq);
+              srv->last_gai = now;
+              return OMCACHE_AGAIN;
+#else // WITH_ASYNCNS
+              // NOTE: this can block
               err = getaddrinfo(srv->hostname, srv->port, &hints, &srv->addrs);
+#endif // WITH_ASYNCNS
             }
           if (err != 0)
             {
@@ -1188,8 +1270,20 @@ int omcache_io(omcache_t *mc,
       polls = poll(pfds, nfds, timeout_poll);
       omc_debug("poll(%d, %d): %d %s", nfds, timeout_poll, polls, polls == -1 ? strerror(errno) : "");
       now = omc_msec();
+      bool found_new_names = false;
       for (int i = 0; (i < nfds) && (ret == OMCACHE_OK || ret == OMCACHE_AGAIN); i++)
         {
+#ifdef WITH_ASYNCNS
+          if (pfds[i].fd == mc->ans_fd)
+            {
+              found_new_names = true;
+              asyncns_wait(mc->ans, 0);
+              for (int j=0; j<mc->server_count; j++)
+                if (mc->servers[j]->nsq)
+                  omc_srv_connect(mc, mc->servers[j]);
+              continue;
+            }
+#endif // WITH_ASYNCNS
           int server_index = omc_int_hash_table_find(mc->fd_table, pfds[i].fd);
           if (server_index == -1)
             {
@@ -1229,7 +1323,8 @@ int omcache_io(omcache_t *mc,
       ret = OMCACHE_AGAIN;  // call again
 
       // break the loop in case we didn't want to poll
-      if (timeout_msec == 0)
+      // but keep going if we found new names to initiate connections to hosts
+      if (timeout_msec == 0 && !found_new_names)
         break;
     }
 

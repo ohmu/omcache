@@ -115,7 +115,10 @@ START_TEST(test_invalid_servers)
   ck_omcache(omcache_noop(oc, 0, 2000), OMCACHE_NO_SERVERS);
   ck_omcache(omcache_noop(oc, 1, 2000), OMCACHE_NO_SERVERS);
   ck_omcache(omcache_noop(oc, 1, 2000), OMCACHE_NO_SERVERS);
-  ck_omcache(omcache_get(oc, (cuc *) "foo", 3, NULL, NULL, NULL, NULL, 2000), OMCACHE_NO_SERVERS);
+  // when built with asyncns it can take one more round of calls for servers to be declared dead
+  int ret = omcache_get(oc, (cuc *) "foo", 3, NULL, NULL, NULL, NULL, 2000);
+  if (ret != OMCACHE_SERVER_FAILURE)
+    ck_assert_int_eq(ret, OMCACHE_NO_SERVERS);
 
   omcache_free(oc);
 }

@@ -12,6 +12,11 @@ OBJ = omcache.o commands.o dist.o md5.o util.o
 CPPFLAGS ?= -Wall -Wextra
 CFLAGS ?= -g -O2
 
+ifeq ($(WITHOUT_ASYNCNS),)
+WITH_CFLAGS += -DWITH_ASYNCNS
+WITH_LIBS += -lasyncns
+endif
+
 all: $(SHLIB_SO) $(STLIB_A)
 
 $(STLIB_A): $(OBJ)
@@ -24,10 +29,10 @@ $(SHLIB_SO): $(SHLIB_V)
 $(SHLIB_V): $(OBJ) symbol.map
 	$(CC) $(LDFLAGS) -shared -fPIC \
 		-Wl,-soname=$(SHLIB_V) -Wl,-version-script=symbol.map \
-		$(filter-out symbol.map,$^) -o $@ -lrt
+		$(filter-out symbol.map,$^) -o $@ -lrt $(WITH_LIBS)
 
 %.o: %.c
-	$(CC) $(CPPFLAGS) $(CFLAGS) -D_GNU_SOURCE=1 -std=gnu99 -fPIC -c $^
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(WITH_CFLAGS) -D_GNU_SOURCE=1 -std=gnu99 -fPIC -c $^
 
 install: $(SHLIB_SO)
 	mkdir -p $(DESTDIR)$(LIBDIR) $(DESTDIR)$(INCLUDEDIR)
