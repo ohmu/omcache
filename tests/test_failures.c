@@ -68,14 +68,14 @@ START_TEST(test_suspended_memcache)
     }
   ck_assert_int_ne(*strbuf, 0);
 
-  // we'll get OMCACHE_NOT_FOUND after this server times out in 1 second
+  // we'll get OMCACHE_SERVER_FAILURE after this server times out in 1 second
   int64_t begin = ot_msec();
-  ck_omcache(omcache_get(oc, (cuc *) strbuf, key_len, &val, &val_len, NULL, NULL, -1), OMCACHE_NOT_FOUND);
+  ck_omcache(omcache_get(oc, (cuc *) strbuf, key_len, &val, &val_len, NULL, NULL, -1), OMCACHE_SERVER_FAILURE);
   ck_assert_int_le(ot_msec() - begin, 1500);
   begin = ot_msec();
-  ck_omcache(omcache_get(oc, (cuc *) strbuf, key_len, &val, &val_len, NULL, NULL, -1), OMCACHE_NOT_FOUND);
+  ck_omcache(omcache_get(oc, (cuc *) strbuf, key_len, &val, &val_len, NULL, NULL, -1), OMCACHE_SERVER_FAILURE);
   ck_assert_int_le(ot_msec() - begin, 1500);
-  // now the server should be disabled and fail faster
+  // now the server should be disabled and fail faster with NOT_FOUND as we're not accessing the failed server anymore
   begin = ot_msec();
   ck_omcache(omcache_get(oc, (cuc *) strbuf, key_len, &val, &val_len, NULL, NULL, -1), OMCACHE_NOT_FOUND);
   ck_assert_int_le(ot_msec() - begin, 500);
@@ -88,6 +88,8 @@ START_TEST(test_suspended_memcache)
   begin = ot_msec();
   ck_omcache(omcache_get(oc, (cuc *) strbuf, key_len, &val, &val_len, NULL, NULL, -1), OMCACHE_NOT_FOUND);
   ck_assert_int_le(ot_msec() - begin, 500);
+  // perform one more 'dummy' call to allow connection to re-establish itself
+  (void) omcache_get(oc, (cuc *) strbuf, key_len, &val, &val_len, NULL, NULL, -1);
   ck_omcache_ok(omcache_get(oc, (cuc *) strbuf, key_len, &val, &val_len, NULL, NULL, -1));
   ck_assert_int_eq(susp_server_index, omcache_server_index_for_key(oc, (cuc *) strbuf, key_len));
 

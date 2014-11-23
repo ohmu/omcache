@@ -329,12 +329,15 @@ static int omc_get_cmd(omcache_t *mc, protocol_binary_command opcode,
 {
   omcache_req_t req;
   omcache_value_t value = {0};
-  size_t req_count = 1, value_count = valuep ? 1 : 0;
+  size_t req_count = 1, value_count = 1;
   int ret = omc_get_multi_cmd(mc, opcode, &key, &key_len, &be_expiration, 1, &req, &req_count,
-                              valuep ? &value : NULL, valuep ? &value_count : NULL,
-                              timeout_msec);
+                              &value, &value_count, timeout_msec);
+  if (value_count)
+    ret = value.status;
   if (value_count == 0 && ret == OMCACHE_OK)
     ret = OMCACHE_NOT_FOUND;
+  else if (ret == OMCACHE_AGAIN && valuep == NULL)
+    ret = OMCACHE_OK;
   if (valuep)
     *valuep = value.data;
   if (value_len)
@@ -343,7 +346,7 @@ static int omc_get_cmd(omcache_t *mc, protocol_binary_command opcode,
     *flags = value.flags;
   if (cas)
     *cas = value.cas;
-  return (ret == OMCACHE_OK && value_count) ? value.status : ret;
+  return ret;
 }
 
 int omcache_get(omcache_t *mc,

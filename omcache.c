@@ -74,6 +74,7 @@ typedef struct omc_srv_s
   uint32_t last_req_recvd;
   uint32_t last_req_sent;
   uint32_t last_req_sent_nq;
+  uint32_t active_requests;
   omc_buf_t send_buffer;
   omc_buf_t recv_buffer;
   bool disabled;
@@ -123,27 +124,30 @@ struct omcache_s
   uint32_t reconnect_timeout_msec;
   uint32_t dead_timeout_msec;
   bool buffer_writes;
-};
 
-typedef struct omc_resp_lookup_s
-{
-  // NOTE: values_returned is the number of responses we've actually been
-  // able to store to *resps.  We don't usually have to worry about
-  // values_size, but for requests that return more than one response per
-  // request (at least stat) we must make sure we don't overflow values.
-  omcache_value_t *values;
-  size_t values_size;
-  size_t values_returned;
-  uint32_t req_id_min;
-  uint32_t req_id_max;
-} omc_resp_lookup_t;
+  struct
+  {
+    bool active;
+    uint32_t min_req;
+    uint32_t max_req;
+    uint32_t count;
+    uint32_t found;
+    omc_hash_table_t *table;
+    // values, values_size and values_returned are reset on each omcache_io call
+    omcache_value_t *values;
+    size_t values_size;
+    size_t values_returned;
+  } lookup;
+};
 
 static int omc_srv_free(omcache_t *mc, omc_srv_t *srv);
 static int omc_srv_connect(omcache_t *mc, omc_srv_t *srv);
-static int omc_srv_io(omcache_t *mc, omc_srv_t *srv, omc_resp_lookup_t *rlookup);
+static int omc_srv_io(omcache_t *mc, omc_srv_t *srv);
 static void omc_srv_reset(omcache_t *mc, omc_srv_t *srv, const char *log_msg);
-static int omc_srv_send_noop(omcache_t *mc, omc_srv_t *srv, bool init);
+static int omc_srv_send_noop(omcache_t *mc, omc_srv_t *srv);
 static omc_ketama_t *omc_ketama_create(omcache_t *mc);
+static uint32_t omc_lookup_discard_requests(omcache_t *mc, omc_srv_t *srv, uint32_t max_req);
+static bool omc_is_request_quiet(uint8_t opcode);
 static inline int64_t omc_msec();
 
 static int g_iov_max = 0;
@@ -184,6 +188,7 @@ int omcache_free(omcache_t *mc)
   free(mc->server_polls);
   free(mc->ketama);
   omc_int_hash_table_free(mc->fd_table);
+  omc_hash_table_free(mc->lookup.table);
   memset(mc, 'M', sizeof(*mc));
   free(mc);
   return OMCACHE_OK;
@@ -461,7 +466,7 @@ struct pollfd *omcache_poll_fds(omcache_t *mc, int *nfds, int *poll_timeout)
       mc->server_polls[n].events = 0;
       if (srv->last_req_sent != srv->last_req_sent_nq)
         {
-          omc_srv_send_noop(mc, srv, false);
+          omc_srv_send_noop(mc, srv);
         }
       if (srv->last_req_recvd < srv->last_req_sent_nq)
         {
@@ -570,7 +575,7 @@ static int omc_ketama_lookup(omcache_t *mc, const unsigned char *key, size_t key
               if (now > selected->srv->retry_at &&
                   max(now, selected->srv->last_io_success + 1) > selected->srv->last_io_attempt)
                 {
-                  omc_srv_io(mc, selected->srv, NULL);
+                  omc_srv_io(mc, selected->srv);
                 }
             }
           skipped ++;
@@ -634,6 +639,7 @@ omc_srv_reset(omcache_t *mc, omc_srv_t *srv, const char *log_msg)
     {
       omc_srv_disable(mc, srv);
     }
+  omc_lookup_discard_requests(mc, srv, UINT32_MAX);
 }
 
 // make sure a connection is established to the server, if not, try to set it up
@@ -766,8 +772,86 @@ static int omc_srv_connect(omcache_t *mc, omc_srv_t *srv)
   srv->conn_timeout = 0;
   srv->last_io_success = omc_msec();
   omc_srv_log(LOG_INFO, srv, "%s", "connected");
-  omc_srv_send_noop(mc, srv, true);
+  omc_srv_send_noop(mc, srv);
+  srv->expected_noop = mc->req_id;
   return OMCACHE_OK;
+}
+
+static bool omc_return_value(omcache_t *mc, omc_srv_t *srv, omcache_value_t *value,
+                             uint32_t req_id, bool multi_req)
+{
+  // pass value to response callback (if any)
+  if (mc->resp_cb)
+    mc->resp_cb(mc, value, mc->resp_cb_context);
+
+  // add it to response list if it matches lookup range
+  if (!mc->lookup.active)
+    return false;
+
+  bool final = (multi_req == false) || (mc->lookup.values_size <= mc->lookup.values_returned);
+  omcache_req_t *req = (final ? omc_hash_table_del : omc_hash_table_find)(mc->lookup.table, req_id);
+  if (req == NULL)
+    return false;
+
+  if (final)
+    {
+      mc->lookup.found ++;
+      srv->active_requests --;
+    }
+
+  omc_srv_debug(srv, "expected response %u (%u / %u): %s",
+                req_id, mc->lookup.found, mc->lookup.count,
+                omcache_strerror(value->status));
+
+  if (mc->lookup.values_size <= mc->lookup.values_returned)
+    {
+      if (mc->lookup.values_size)
+        omc_srv_log(LOG_WARNING, srv,
+                    "no space to store response %u "
+                    "in a buffer of %zu entries, dropping response",
+                    req_id, mc->lookup.values_size);
+      return false;
+    }
+  mc->lookup.values[mc->lookup.values_returned++] = *value;
+  return true;
+}
+
+static uint32_t omc_lookup_discard_requests(omcache_t *mc, omc_srv_t *srv, uint32_t max_req)
+{
+  if (!mc->lookup.active || srv->active_requests == 0)
+    return 0;
+  uint32_t discarded = 0;
+  for (uint32_t bucket = 0; bucket < mc->lookup.table->size; bucket ++)
+    for (omc_hash_node_t *node = mc->lookup.table->buckets[bucket], *next_node = NULL;
+          node != NULL; node = next_node)
+      {
+        omcache_req_t *req = (omcache_req_t *) node->val;
+        next_node = node->next;
+        if (req->server_index == srv->list_index && req->header.opaque < max_req)
+          {
+            // response "found" to never arrive
+            discarded ++;
+            if (max_req == UINT32_MAX || !omc_is_request_quiet(req->header.opcode))
+              {
+                // server failed (called from omc_srv_reset or request wasn't quiet)
+                omcache_value_t value = {
+                  .status = OMCACHE_SERVER_FAILURE,
+                  .key = req->key,
+                  .key_len = be16toh(req->header.keylen),
+                  .data = NULL,
+                  };
+                omc_return_value(mc, srv, &value, req->header.opaque, false);
+              }
+            else
+              {
+                mc->lookup.found ++;
+                srv->active_requests --;
+                omc_hash_table_del(mc->lookup.table, node->key);
+              }
+          }
+      }
+  omc_log(LOG_NOTICE, "discarded %u requests", discarded);
+  return discarded;
 }
 
 static int omc_buffer_realloc(omc_buf_t *buf, size_t buf_max, uint32_t required)
@@ -829,7 +913,7 @@ static int omc_do_read(omcache_t *mc, omc_srv_t *srv, size_t msg_size, bool keep
 
 // read any responses returned by the server calling mc->resp_cb on them.
 // if a response's 'opaque' matches req_id store that response in *resp.
-static int omc_srv_read(omcache_t *mc, omc_srv_t *srv, omc_resp_lookup_t *rlookup)
+static int omc_srv_read(omcache_t *mc, omc_srv_t *srv)
 {
   protocol_binary_response_header stack_header;
   bool keep_buffers = false;
@@ -888,15 +972,7 @@ static int omc_srv_read(omcache_t *mc, omc_srv_t *srv, omc_resp_lookup_t *rlooku
                   value.key = srv->recv_buffer.r + sizeof(hdr->bytes) + hdr->response.extlen;
                   value.key_len = be16toh(hdr->response.keylen);
                 }
-              if (mc->resp_cb)
-                mc->resp_cb(mc, &value, mc->resp_cb_context);
-              if (rlookup &&
-                  rlookup->values_size > rlookup->values_returned &&
-                  hdr->response.opaque >= rlookup->req_id_min &&
-                  hdr->response.opaque <= rlookup->req_id_max)
-                {
-                  rlookup->values[rlookup->values_returned++] = value;
-                }
+              omc_return_value(mc, srv, &value, hdr->response.opaque, false);
               errno = EMSGSIZE;
               omc_srv_reset(mc, srv, "buffer full - can't handle response");
             }
@@ -907,30 +983,36 @@ static int omc_srv_read(omcache_t *mc, omc_srv_t *srv, omc_resp_lookup_t *rlooku
                     hdr->response.opcode, be16toh(hdr->response.status),
                     hdr->response.opaque);
 
+      bool multi_req = (hdr->response.opcode == PROTOCOL_BINARY_CMD_STAT &&
+        hdr->response.status == 0 && hdr->response.keylen != 0);
+
       if (hdr->response.opaque)
         {
-          if (!(hdr->response.opcode == PROTOCOL_BINARY_CMD_STAT &&
-                hdr->response.status == 0 &&
-                hdr->response.keylen != 0))
+          if (!multi_req)
             {
               // set last received request number for everything but a
               // successful response to stat request which doesn't have an
               // empty key which signals end of stat responses.
               srv->last_req_recvd = hdr->response.opaque;
             }
-          if (hdr->response.opcode == PROTOCOL_BINARY_CMD_NOOP &&
-              hdr->response.opaque == srv->expected_noop)
+          if (hdr->response.opcode == PROTOCOL_BINARY_CMD_NOOP)
             {
-              // a connection setup noop message, mark server alive and don't process this further.
-              srv->expected_noop = 0;
-              if (srv->disabled)
+              // when we receive a NOOP all quiet lookups before this request will
+              // not return a value
+              omc_lookup_discard_requests(mc, srv, hdr->response.opaque);
+              if (hdr->response.opaque == srv->expected_noop)
                 {
-                  omc_srv_log(LOG_NOTICE, srv, "%s", "re-enabling server");
-                  srv->disabled = false;
+                  // a connection setup noop message, mark server alive and don't process this further.
+                  srv->expected_noop = 0;
+                  if (srv->disabled)
+                    {
+                      omc_srv_log(LOG_NOTICE, srv, "%s", "re-enabling server");
+                      srv->disabled = false;
+                    }
+                  srv->recv_buffer.r += msg_size;
+                  omc_srv_debug(srv, "%s", "received expected noop packet");
+                  continue;
                 }
-              srv->recv_buffer.r += msg_size;
-              omc_srv_debug(srv, "%s", "received expected noop packet");
-              continue;
             }
         }
 
@@ -967,30 +1049,8 @@ static int omc_srv_read(omcache_t *mc, omc_srv_t *srv, omc_resp_lookup_t *rlooku
 
       srv->recv_buffer.r += msg_size;
 
-      // pass it to response callback
-      if (mc->resp_cb)
+      if (omc_return_value(mc, srv, &value, hdr->response.opaque, multi_req))
         {
-          mc->resp_cb(mc, &value, mc->resp_cb_context);
-        }
-
-      // return if it it was requested and we have room for the response
-      if (rlookup &&
-          hdr->response.opaque >= rlookup->req_id_min &&
-          hdr->response.opaque <= rlookup->req_id_max)
-        {
-          omc_srv_debug(srv, "got expected response %u (%u / %u)",
-                        hdr->response.opaque, hdr->response.opaque - rlookup->req_id_min,
-                        rlookup->req_id_max - rlookup->req_id_min + 1);
-          if (rlookup->values_size <= rlookup->values_returned)
-            {
-              if (rlookup->values_size)
-                omc_srv_log(LOG_WARNING, srv,
-                            "no space to store response %u "
-                            "in a buffer of %zu entries, dropping response",
-                            hdr->response.opaque, rlookup->values_size);
-              continue;
-            }
-          rlookup->values[rlookup->values_returned++] = value;
           // don't overwrite the buffer to avoid overwriting the response
           keep_buffers = true;
         }
@@ -1009,7 +1069,7 @@ static int omc_srv_read(omcache_t *mc, omc_srv_t *srv, omc_resp_lookup_t *rlooku
 // try to write/connect if there's pending data to this server.  read any
 // responses returned by the server calling mc->resp_cb on them.  if a
 // response's 'opaque' matches req_id store that response in *resp.
-static int omc_srv_io(omcache_t *mc, omc_srv_t *srv, omc_resp_lookup_t *rlookup)
+static int omc_srv_io(omcache_t *mc, omc_srv_t *srv)
 {
   bool again_w = false, again_r = false;
   ssize_t buf_len = srv->send_buffer.w - srv->send_buffer.r;
@@ -1055,7 +1115,7 @@ static int omc_srv_io(omcache_t *mc, omc_srv_t *srv, omc_resp_lookup_t *rlookup)
   if (srv->conn_timeout == 0 && srv->sock >= 0 &&
       srv->last_req_recvd < srv->last_req_sent_nq)
     {
-      ret = omc_srv_read(mc, srv, rlookup);
+      ret = omc_srv_read(mc, srv);
       if (ret == OMCACHE_AGAIN)
         again_r = true;
       else if (ret != OMCACHE_OK)
@@ -1072,32 +1132,39 @@ int omcache_io(omcache_t *mc,
                omcache_value_t *values, size_t *value_count,
                int32_t timeout_msec)
 {
-  int again = 0, ret = OMCACHE_OK;
-  bool nothing_to_poll = false;
+  int ret = OMCACHE_OK;
   int64_t now = omc_msec();
-  int64_t timeout_abs = (timeout_msec > 0) ? now + timeout_msec : - 1;
-  omc_resp_lookup_t rlookup = {0};
+  int64_t timeout_abs = (timeout_msec > 0) ? now + timeout_msec : timeout_msec;
 
   if (reqs && req_count && *req_count)
     {
-      rlookup.values = values;
-      rlookup.values_size = value_count ? *value_count : 0;
-      rlookup.req_id_min = reqs[0].header.opaque;
-      rlookup.req_id_max = reqs[*req_count - 1].header.opaque;
-      if (rlookup.req_id_max - rlookup.req_id_min + 1 != *req_count)
-        return OMCACHE_INVALID;
-      if (value_count && *value_count < *req_count)
-        return OMCACHE_INVALID;
+      if (!(reqs[0].header.opaque == mc->lookup.min_req &&
+            reqs[*req_count - 1].header.opaque == mc->lookup.max_req))
+        {
+          omc_log(LOG_ERR, "%s", "omcache_io called with requests that are not active");
+          return OMCACHE_INVALID;
+        }
+      mc->lookup.active = true;
+      mc->lookup.values = values;
+      mc->lookup.values_size = value_count ? *value_count : 0;
+      mc->lookup.values_returned = 0;
     }
+  else
+    {
+      mc->lookup.active = false;
+      mc->lookup.min_req = 0;
+      mc->lookup.max_req = 0;
+    }
+
   if (value_count)
     *value_count = 0;
 
   while (ret == OMCACHE_OK || ret == OMCACHE_AGAIN)
     {
-      omc_debug("looking for req_ids (%u..%u); timeout in %lld msec",
-                rlookup.req_id_min, rlookup.req_id_max,
-                (long long) (timeout_abs != -1 ? timeout_abs - omc_msec() : -1));
-      if (timeout_abs >= 0)
+      if (mc->lookup.active)
+        omc_debug("looking for req_ids (%u..%u)", mc->lookup.min_req, mc->lookup.max_req);
+      omc_debug("timeout in %lld msec", (long long) (timeout_abs > 0 ? timeout_abs - omc_msec() : timeout_abs));
+      if (timeout_abs > 0)
         {
           now = omc_msec();
           if (now > timeout_abs)
@@ -1109,21 +1176,19 @@ int omcache_io(omcache_t *mc,
           timeout_msec = timeout_abs - now;
         }
 
-      again = 0;
       int nfds = -1, timeout_poll = -1, polls __attribute__((unused)) = -1;
       struct pollfd *pfds = omcache_poll_fds(mc, &nfds, &timeout_poll);
       if (nfds == 0)
         {
           omc_debug("%s", "nothing to poll, breaking");
           ret = OMCACHE_OK;
-          nothing_to_poll = true;
           break;
         }
-      timeout_poll = (timeout_msec > 0) ? min(timeout_msec, timeout_poll) : timeout_poll;
+      timeout_poll = (timeout_msec >= 0) ? min(timeout_msec, timeout_poll) : timeout_poll;
       polls = poll(pfds, nfds, timeout_poll);
       omc_debug("poll(%d, %d): %d %s", nfds, timeout_poll, polls, polls == -1 ? strerror(errno) : "");
       now = omc_msec();
-      for (int i=0; i<nfds; i++)
+      for (int i = 0; (i < nfds) && (ret == OMCACHE_OK || ret == OMCACHE_AGAIN); i++)
         {
           int server_index = omc_int_hash_table_find(mc->fd_table, pfds[i].fd);
           if (server_index == -1)
@@ -1144,45 +1209,35 @@ int omcache_io(omcache_t *mc,
                 {
                   errno = ETIMEDOUT;
                   omc_srv_reset(mc, srv, "io timeout");
-                  again ++;
                 }
               continue;
             }
-          ret = omc_srv_io(mc, srv, &rlookup);
+          ret = omc_srv_io(mc, srv);
           omc_srv_debug(srv, "io: %s", omcache_strerror(ret));
-          if (ret == OMCACHE_AGAIN)
-            again ++;
-          else if (ret != OMCACHE_OK)
-            break;
         }
-
-      omc_debug("status %d (%s), %zu responses found, timeout %d",
-                ret, omcache_strerror(ret), rlookup.values_returned, timeout_msec);
 
       // break the loop if we found any responses: the receive buffer could be
       // overwritten by new calls to omc_srv_io so we need to allow the
       // caller to process the response before resuming reads.
-      if (rlookup.values_returned)
+      if (mc->lookup.active && (mc->lookup.values_returned || mc->lookup.found == mc->lookup.count))
         {
-          // don't want to return OMCACHE_AGAIN if we found our key
-          omc_debug("found %zu responses, breaking loop", rlookup.values_returned);
-          ret = OMCACHE_OK;
-          again = 0;
+          omc_debug("returned %zu responses, breaking loop", mc->lookup.values_returned);
+          ret = (mc->lookup.found == mc->lookup.count) ? OMCACHE_OK : OMCACHE_AGAIN;
           break;
         }
+
+      ret = OMCACHE_AGAIN;  // call again
 
       // break the loop in case we didn't want to poll
       if (timeout_msec == 0)
         break;
     }
-  if (nothing_to_poll && req_count)
+
+  if ((!mc->lookup.active || mc->lookup.found == mc->lookup.count) && req_count)
     *req_count = 0;
   if (value_count)
-    *value_count = rlookup.values_returned;
-  if (nothing_to_poll)
-    return OMCACHE_OK;
-  if (ret == OMCACHE_OK && again > 0)
-    return OMCACHE_AGAIN;
+    *value_count = mc->lookup.values_returned;
+  mc->lookup.active = false;
   return ret;
 }
 
@@ -1333,11 +1388,11 @@ static void omc_req_id_check(omcache_t *mc, size_t req_count)
     if (mc->servers[i]->connected)
       {
         mc->servers[i]->last_req_recvd = 0;
-        omc_srv_send_noop(mc, mc->servers[i], false);
+        omc_srv_send_noop(mc, mc->servers[i]);
       }
 }
 
-static int omc_srv_send_noop(omcache_t *mc, omc_srv_t *srv, bool init)
+static int omc_srv_send_noop(omcache_t *mc, omc_srv_t *srv)
 {
   omc_req_id_check(mc, 1);
   struct omcache_req_header_s hdr = {
@@ -1346,8 +1401,6 @@ static int omc_srv_send_noop(omcache_t *mc, omc_srv_t *srv, bool init)
     .datatype = PROTOCOL_BINARY_RAW_BYTES,
     .opaque = ++ mc->req_id,
     };
-  if (init)
-    srv->expected_noop = mc->req_id;
   struct iovec iov[] = {{ .iov_len = sizeof(hdr), .iov_base = &hdr }};
   return omc_srv_submit(mc, srv, iov, 1, 1, &hdr);
 }
@@ -1377,19 +1430,15 @@ int omcache_command_status(omcache_t *mc, omcache_req_t *req, int32_t timeout_ms
   size_t req_count = 1, value_count = 1;
   omcache_value_t value = {0};
   int req_srv_idx = req->server_index;
-
   int ret = omcache_command(mc, req, &req_count, &value, &value_count, timeout_msec);
   if (value_count)
-    return value.status;
-  if (ret != OMCACHE_OK || timeout_msec == 0)
-    return ret;
-  // is the server dead or did our response just disappear in thin air?
+    ret = value.status;
   // note that in case the caller asked for a specific server we'll say that
   // servers are not available, if we picked the server from our pool we'll
   // say communication with one server failed
-  if (!mc->servers[req->server_index]->connected)
-    return req_srv_idx >= 0 ? OMCACHE_NO_SERVERS : OMCACHE_SERVER_FAILURE;
-  return OMCACHE_FAIL;
+  if (ret == OMCACHE_SERVER_FAILURE && req_srv_idx >= 0)
+    ret = OMCACHE_NO_SERVERS;
+  return ret;
 }
 
 int omcache_command(omcache_t *mc,
@@ -1418,6 +1467,14 @@ int omcache_command(omcache_t *mc,
     size_t size;
   } reqs_per_server[mc->server_count];
   memset(reqs_per_server, 0, sizeof(reqs_per_server));
+
+  // set up response lookup table
+  mc->lookup.active = false;
+  mc->lookup.count = 0;
+  mc->lookup.found = 0;
+  mc->lookup.min_req = UINT32_MAX;
+  mc->lookup.max_req = 0;
+  mc->lookup.table = omc_hash_table_init(mc->lookup.table, req_count, NULL);
 
   if (mc->server_count == 1)
     {
@@ -1448,7 +1505,7 @@ int omcache_command(omcache_t *mc,
           if (rps->count == 0 && mc->buffer_writes == false)
             {
               omc_srv_t *srv = mc->servers[server_index];
-              ret = omc_srv_io(mc, srv, NULL);
+              ret = omc_srv_io(mc, srv);
               omc_srv_debug(srv, "io: %s", omcache_strerror(ret));
               if (ret != OMCACHE_AGAIN && ret != OMCACHE_OK)
                 {
@@ -1483,11 +1540,13 @@ int omcache_command(omcache_t *mc,
 
   for (int i = 0; i < mc->server_count; i ++)
     {
+      omc_srv_t *srv = mc->servers[i];
       struct rpsbucket_s *rps = &reqs_per_server[i];
+
+      srv->active_requests = rps->count;
       if (rps->count == 0)
         continue;
 
-      omc_srv_t *srv = mc->servers[i];
       struct iovec iov[min(4 * rps->count, g_iov_max)];
       int iov_idx = 0, iov_req_count = 0;
       size_t srv_reqs_sent = 0;
@@ -1537,6 +1596,12 @@ int omcache_command(omcache_t *mc,
         {
           // NOTE: in case of 1 server or 1 request reqs and rps->reqs may point to the same place
           memmove(reqs + *req_countp, rps->reqs, srv_reqs_sent * sizeof(omcache_req_t));
+          if (mc->lookup.min_req == UINT32_MAX)
+            mc->lookup.min_req = rps->reqs[0].header.opaque;
+          mc->lookup.max_req = rps->reqs[srv_reqs_sent - 1].header.opaque;
+          mc->lookup.count += srv_reqs_sent;
+          for (size_t ri = 0; ri < srv_reqs_sent; ri ++)
+            omc_hash_table_add(mc->lookup.table, rps->reqs[ri].header.opaque, &reqs[*req_countp + ri]);
           *req_countp += srv_reqs_sent;
         }
       if (rps->size)
@@ -1545,6 +1610,7 @@ int omcache_command(omcache_t *mc,
 
   if (timeout_msec == 0 || *req_countp == 0)
     {
+      mc->lookup.active = false;
       // no response requested or data wasn't sent. we're done.
       if (value_count)
         *value_count = 0;

@@ -53,7 +53,7 @@ static void check_n_values(omcache_t *oc, memcached_st *mc,
   size_t value_count = key_count;
   omcache_req_t reqs[key_count];
   size_t req_count = key_count;
-  ck_omcache_ok(omcache_get_multi(oc, (cuc **) keys, key_lens, key_count, reqs, &req_count, values, &value_count, 5000));
+  ck_omcache_ok_or_again(omcache_get_multi(oc, (cuc **) keys, key_lens, key_count, reqs, &req_count, values, &value_count, 5000));
   size_t omcache_values_found = value_count;
   while (req_count > 0)
     {
@@ -62,6 +62,7 @@ static void check_n_values(omcache_t *oc, memcached_st *mc,
         {
           value_count = key_count;
           ret = omcache_io(oc, reqs, &req_count, values, &value_count, 5000);
+          ck_omcache_ok_or_again(ret);
           omcache_values_found += value_count;
         }
     }

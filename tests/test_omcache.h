@@ -41,6 +41,8 @@
 
 #define ck_omcache_ok(c) ck_omcache((c), OMCACHE_OK)
 
+#define ck_omcache_ok_or_again(c) ({ int omc_ret1 = (c); if (omc_ret1 != OMCACHE_OK) ck_omcache(omc_ret1, OMCACHE_AGAIN); })
+
 #define ot_tcase_add(s,f) \
   ({  TCase *tc_ = tcase_create(#f); \
       tcase_add_test(tc_, f); \

@@ -238,11 +238,11 @@ START_TEST(test_gat)
 
   // set with 1 second timeout, gat immediately, it should work as the value has not expired yet
   ck_omcache_ok(omcache_set(oc, key, key_len, (cuc *) "asdf", 4, 1, 0, 0, TIMEOUT));
-  ck_omcache_ok(omcache_gat(oc, key, key_len, &get_val, &val_len, 2, NULL, &cas, TIMEOUT));
+  ck_omcache_ok(omcache_gat(oc, key, key_len, &get_val, &val_len, 3, NULL, &cas, TIMEOUT));
   ck_assert_uint_eq(val_len, 4);
   ck_assert_int_eq(memcmp(get_val, "asdf", 4), 0);
   // now sleep and check that the value is still there (gat should've extended its validity)
-  usleep(1500000);
+  usleep(2000000);
   ck_omcache_ok(omcache_get(oc, key, key_len, &get_val, &val_len, NULL, &cas, TIMEOUT));
   ck_assert_uint_eq(val_len, 4);
   ck_assert_int_eq(memcmp(get_val, "asdf", 4), 0);
@@ -328,12 +328,12 @@ START_TEST(test_req_id_wraparound)
   size_t value_count = 1000, values_found = 0;
   omcache_req_t reqs[1000];
   size_t req_count = 1000;
-  ck_omcache_ok(omcache_get_multi(oc, (cuc **) keys, key_lens, 1000, reqs, &req_count, values, &value_count, 5000));
+  ck_omcache_ok_or_again(omcache_get_multi(oc, (cuc **) keys, key_lens, 1000, reqs, &req_count, values, &value_count, 5000));
   values_found = value_count;
   while (req_count > 0)
     {
       value_count = 1000;
-      ck_omcache_ok(omcache_io(oc, reqs, &req_count, values, &value_count, 5000));
+      ck_omcache_ok_or_again(omcache_io(oc, reqs, &req_count, values, &value_count, 5000));
       values_found += value_count;
     }
   ck_assert_int_eq(values_found, 1000);
@@ -372,12 +372,12 @@ START_TEST(test_buffering)
   size_t value_count = 1000, values_found = 0;
   omcache_req_t reqs[1000];
   size_t req_count = 1000;
-  ck_omcache_ok(omcache_get_multi(oc, (cuc **) keys, key_lens, 1000, reqs, &req_count, values, &value_count, 5000));
+  ck_omcache_ok_or_again(omcache_get_multi(oc, (cuc **) keys, key_lens, 1000, reqs, &req_count, values, &value_count, 5000));
   values_found = value_count;
   while (req_count > 0)
     {
       value_count = 1000;
-      ck_omcache_ok(omcache_io(oc, reqs, &req_count, values, &value_count, 5000));
+      ck_omcache_ok_or_again(omcache_io(oc, reqs, &req_count, values, &value_count, 5000));
       values_found += value_count;
       // check that the last character of key is odd (ord("0") % 2 == 0)
       for (size_t i = 0; i < value_count; i ++)
@@ -385,14 +385,14 @@ START_TEST(test_buffering)
     }
   ck_assert_int_eq(values_found, 500);
 
-  // test too low limits for value counts:
+  // test trying to fetch non-matching request range
   // omcache_get_multi fails with a too low value count
-  value_count = 1;
-  req_count = 1000;
+  req_count = 999;
   ck_omcache(OMCACHE_INVALID,
-    omcache_get_multi(oc, (cuc **) keys, key_lens, 1000, reqs, &req_count, values, &value_count, 5000));
+    omcache_io(oc, reqs, &req_count, NULL, NULL, 5000));
   // but omcache_stat doesn't really know how many values we will receive,
   // so it'll accept the request but silently drop some messages
+  value_count = 1;
   ck_omcache_ok(omcache_stat(oc, "", values, &value_count, 0, 5000));
   for (int i = 0; i < 1000; i ++)
     free(keys[i]);
@@ -437,9 +437,9 @@ START_TEST(test_response_callback)
   // no even keys should be set
   omcache_req_t reqs[64];
   size_t req_count = 64;
-  ck_omcache_ok(omcache_get_multi(oc, (cuc **) keys, key_lens, 64, reqs, &req_count, NULL, NULL, 5000));
+  ck_omcache_ok_or_again(omcache_get_multi(oc, (cuc **) keys, key_lens, 64, reqs, &req_count, NULL, NULL, 5000));
   while (req_count > 0)
-    ck_omcache_ok(omcache_io(oc, reqs, &req_count, NULL, NULL, 5000));
+    ck_omcache_ok_or_again(omcache_io(oc, reqs, &req_count, NULL, NULL, 5000));
   ck_assert_int_eq(values_found, 32);
 
   // now do the same thing with GAT (get-and-touch)
@@ -448,9 +448,9 @@ START_TEST(test_response_callback)
   time_t expirations[64];
   for (int i = 0; i < 64; i ++)
     expirations[i] = 10 + i;
-  ck_omcache_ok(omcache_gat_multi(oc, (cuc **) keys, key_lens, expirations, 64, reqs, &req_count, NULL, NULL, 5000));
+  ck_omcache_ok_or_again(omcache_gat_multi(oc, (cuc **) keys, key_lens, expirations, 64, reqs, &req_count, NULL, NULL, 5000));
   while (req_count > 0)
-    ck_omcache_ok(omcache_io(oc, reqs, &req_count, NULL, NULL, 5000));
+    ck_omcache_ok_or_again(omcache_io(oc, reqs, &req_count, NULL, NULL, 5000));
   ck_assert_int_eq(values_found, 32);
 
   for (int i = 0; i < 64; i ++)
