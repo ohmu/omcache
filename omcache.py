@@ -6,26 +6,33 @@
 # This file is under the Apache License, Version 2.0.
 # See the file `LICENSE` for details.
 
+from collections import namedtuple
 from functools import wraps
+from select import select as select_select
 from sys import version_info
 import cffi
 import logging
 import os
+import socket
+import time
 
 _ffi = cffi.FFI()
 _ffi.cdef("""
     typedef long time_t;
+    struct pollfd {
+        int   fd;         /* file descriptor */
+        short events;     /* requested events */
+        short revents;    /* returned events */
+    };
     """)
 _ffi.cdef(open(os.path.join(os.path.dirname(__file__), "omcache_cdef.h")).read())
 _oc = _ffi.dlopen("libomcache.so.0")
 
-_sizep = _ffi.new("size_t *")
-_sizep2 = _ffi.new("size_t *")
-_u32p = _ffi.new("uint32_t *")
-_u64p = _ffi.new("uint64_t *")
-_cucpp = _ffi.new("const unsigned char **")
-
 DELTA_NO_ADD = 0xffffffff
+
+# From <bits/poll.h>
+POLLIN = 1
+POLLOUT = 4
 
 # OMcache uses sys/syslog.h priority numbers
 LOG_ERR = 3
@@ -33,6 +40,40 @@ LOG_WARNING = 4
 LOG_NOTICE = 5
 LOG_INFO = 6
 LOG_DEBUG = 7
+
+# Memcache binary protocol command opcodes
+CMD_GET = 0x00
+CMD_SET = 0x01
+CMD_ADD = 0x02
+CMD_REPLACE = 0x03
+CMD_DELETE = 0x04
+CMD_INCREMENT = 0x05
+CMD_DECREMENT = 0x06
+CMD_QUIT = 0x07
+CMD_FLUSH = 0x08
+CMD_GETQ = 0x09
+CMD_NOOP = 0x0a
+CMD_VERSION = 0x0b
+CMD_GETK = 0x0c
+CMD_GETKQ = 0x0d
+CMD_APPEND = 0x0e
+CMD_PREPEND = 0x0f
+CMD_STAT = 0x10
+CMD_SETQ = 0x11
+CMD_ADDQ = 0x12
+CMD_REPLACEQ = 0x13
+CMD_DELETEQ = 0x14
+CMD_INCREMENTQ = 0x15
+CMD_DECREMENTQ = 0x16
+CMD_QUITQ = 0x17
+CMD_FLUSHQ = 0x18
+CMD_APPENDQ = 0x19
+CMD_PREPENDQ = 0x1a
+CMD_TOUCH = 0x1c
+CMD_GAT = 0x1d
+CMD_GATQ = 0x1e
+CMD_GATK = 0x23
+CMD_GATKQ = 0x24
 
 
 class Error(Exception):
@@ -79,12 +120,26 @@ def _to_string(s):
         msg = msg.decode("utf-8")
     return msg
 
+if socket.htonl(1) == 1:
+    def _htobe64(v):
+        return v
+else:
+    def _htobe64(v):
+        h = socket.htonl(v >> 32)
+        l = socket.htonl(v & 0xffffffff)
+        return (l << 32) | h
+
+
+OMcacheValue = namedtuple("OMcacheValue", ["status", "key", "value", "flags", "cas", "delta_value"])
+
 
 class OMcache(object):
-    def __init__(self, server_list, log=None):
+    def __init__(self, server_list, log=None, select=None):
         self.omc = _oc.omcache_init()
         self._omc_log_cb = _ffi.callback("void(void*, int, const char *)", self._omc_log)
+        self._log = None
         self.log = log
+        self.select = select or select_select
         self._buffering = False
         self._conn_timeout = None
         self._reconn_timeout = None
@@ -138,11 +193,8 @@ class OMcache(object):
         _oc.omcache_set_log_callback(self.omc, level, log_cb, _ffi.NULL)
 
     @staticmethod
-    def _omc_check(name, ret, return_buffer=False, allowed=[_oc.OMCACHE_BUFFERED]):
-        if return_buffer:
-            if ret == _oc.OMCACHE_OK:
-                return _ffi.buffer(_cucpp[0], _sizep[0])[:]
-        elif ret == _oc.OMCACHE_OK or ret in allowed:
+    def _omc_check(ret, name, allowed=[_oc.OMCACHE_BUFFERED]):
+        if ret == _oc.OMCACHE_OK or ret in allowed:
             return ret
         if ret == _oc.OMCACHE_NOT_FOUND:
             raise NotFoundError
@@ -157,22 +209,11 @@ class OMcache(object):
         errstr = _to_string(_oc.omcache_strerror(ret))
         raise CommandError("{0}: {1}".format(name, errstr), status=ret)
 
-    def _omc_return(self, name=None, return_buffer=False):
-        def decorate(func):
-            @wraps(func)
-            def check_rc_wrapper(self, *args, **kwargs):
-                ret = func(self, *args, **kwargs)
-                return self._omc_check(name or func.__name__, ret, return_buffer)
-            return check_rc_wrapper
-        return decorate
-
-    @_omc_return("omcache_set_servers")
     def set_servers(self, server_list):
         if isinstance(server_list, (list, set, tuple)):
             server_list = ",".join(server_list)
         return _oc.omcache_set_servers(self.omc, _to_bytes(server_list))
 
-    @_omc_return("omcache_set_distribution_method")
     def set_distribution_method(self, method):
         if method == "libmemcached_ketama":
             ms = _ffi.addressof(_oc.omcache_dist_libmemcached_ketama)
@@ -189,7 +230,6 @@ class OMcache(object):
         return self._conn_timeout
 
     @connect_timeout.setter
-    @_omc_return("omcache_set_connect_timeout")
     def connect_timeout(self, msec):
         self._conn_timeout = msec
         return _oc.omcache_set_connect_timeout(self.omc, msec)
@@ -199,7 +239,6 @@ class OMcache(object):
         return self._reconn_timeout
 
     @reconnect_timeout.setter
-    @_omc_return("omcache_set_reconnect_timeout")
     def reconnect_timeout(self, msec):
         self._reconn_timeout = msec
         return _oc.omcache_set_reconnect_timeout(self.omc, msec)
@@ -209,7 +248,6 @@ class OMcache(object):
         return self._dead_timeout
 
     @dead_timeout.setter
-    @_omc_return("omcache_set_dead_timeout")
     def dead_timeout(self, msec):
         self._dead_timeout = msec
         return _oc.omcache_set_dead_timeout(self.omc, msec)
@@ -219,140 +257,206 @@ class OMcache(object):
         return self._buffering
 
     @buffering.setter
-    @_omc_return("omcache_set_buffering")
     def buffering(self, enabled):
         self._buffering = True if enabled else False
         return _oc.omcache_set_buffering(self.omc, enabled)
 
-    @_omc_return("omcache_reset_buffers")
     def reset_buffers(self):
         return _oc.omcache_reset_buffers(self.omc)
 
-    @_omc_return("omcache_io")
-    def flush(self, timeout=-1):
-        return _oc.omcache_io(self.omc, _ffi.NULL, _ffi.NULL, _ffi.NULL, _ffi.NULL, timeout)
-
-    @_omc_return("omcache_noop")
-    def noop(self, server_index=0, timeout=None):
-        timeout = timeout if timeout is not None else self.io_timeout
-        return _oc.omcache_noop(self.omc, server_index, timeout)
-
-    def stat(self, command="", server_index=0, timeout=None):
-        command = _to_bytes(command)
-        timeout = timeout if timeout is not None else self.io_timeout
-        stat_count = 50  # 50 keys enough?
-        values = _ffi.new("omcache_value_t[]", stat_count)
-        _sizep[0] = stat_count
-        ret = _oc.omcache_stat(self.omc, command, values, _sizep, server_index, timeout)
-        self._omc_check("omcache_stat", ret)
-        results = {}
-        for i in range(_sizep[0]):
-            self._omc_check("omcache_stat", values[i].status)
+    def _omc_io(self, requests, request_count, values, value_count, timeout):
+        nfdsp = _ffi.new("int *")
+        polltimeoutp = _ffi.new("int *")
+        polls = _oc.omcache_poll_fds(self.omc, nfdsp, polltimeoutp)
+        rlist, wlist = [], []
+        for i in xrange(nfdsp[0]):
+            if polls[i].events & POLLIN:
+                rlist.append(polls[i].fd)
+            if polls[i].events & POLLOUT:
+                wlist.append(polls[i].fd)
+        if rlist or wlist:
+            if timeout <= 0:
+                timeout = 0
+            else:
+                timeout = min(polltimeoutp[0], timeout) / 1000.0
+            self.select(rlist, wlist, [], timeout)
+        ret = _oc.omcache_io(self.omc, requests, request_count, values, value_count, 0)
+        self._omc_check(ret, "omcache_io", allowed=[_oc.OMCACHE_AGAIN])
+        if values == _ffi.NULL:
+            yield OMcacheValue(ret, None, None, None, None, None)
+            return
+        for i in range(value_count[0]):
             key = _ffi.buffer(values[i].key, values[i].key_len)[:]
             value = _ffi.buffer(values[i].data, values[i].data_len)[:]
-            if not key and not value:
+            yield OMcacheValue(values[i].status, key, value, values[i].flags, values[i].cas, values[i].delta_value)
+
+    def _omc_command_async(self, requests, value_count, timeout, func_name):
+        request_count = _ffi.new("size_t *")
+        request_count[0] = len(requests)
+        if value_count is None:
+            value_count = len(requests)
+        value_countp = _ffi.new("size_t *")
+        values = _ffi.new("omcache_value_t[]", value_count)
+        begin = time.time()
+        results = []
+        ret = _oc.omcache_command(self.omc, requests, request_count, _ffi.NULL, _ffi.NULL, 0)
+        self._omc_check(ret, func_name, allowed=[_oc.OMCACHE_AGAIN, _oc.OMCACHE_BUFFERED])
+        while request_count[0]:
+            value_countp[0] = value_count
+            if timeout == -1:
+                time_left = 3600
+            else:
+                time_left = timeout - (time.time() - begin) * 1000
+            if time_left < 0:
                 break
-            results[key] = value
+            results.extend(self._omc_io(requests, request_count, values, value_countp, time_left))
         return results
 
-    @_omc_return("omcache_set")
+    def _omc_command(func, expected_values=1):
+        @wraps(func)
+        def omc_async_call(self, *args, **kwargs):
+            func_name = kwargs.get("func_name", func.__name__)
+            timeout = kwargs.pop("timeout", self.io_timeout)
+            req, objs = func(self, *args, **kwargs)
+            if self.select == select_select:
+                ret = _oc.omcache_command_status(self.omc, req, timeout)
+                return self._omc_check(ret, func_name)
+            resp = self._omc_command_async(req, expected_values, timeout, func_name)[0]
+            return self._omc_check(resp.status, func_name)
+        return omc_async_call
+
+    def flush(self, timeout=-1):
+        if self.select == select_select:
+            ret = _oc.omcache_io(self.omc, _ffi.NULL, _ffi.NULL, _ffi.NULL, _ffi.NULL, timeout)
+        else:
+            ret = _oc.OMCACHE_AGAIN
+            time_left = 1
+            begin = time.time()
+            while ret == _oc.OMCACHE_AGAIN and time_left > 0:
+                time_left = 3600 if timeout == -1 else timeout - (time.time() - begin) * 1000
+                resps = list(self._omc_io(_ffi.NULL, _ffi.NULL, _ffi.NULL, _ffi.NULL, time_left))
+                ret = resps[0].status
+        return self._omc_check(ret, "flush")
+
+    def _request(self, opcode, key=None, data=None, extra=None, cas=0, server_index=-1, objects=None, request=None):
+        if objects is None:
+            objects = []
+        requests = None
+        if request is None:
+            requests = _ffi.new("omcache_req_t[]", 1)
+            request = requests[0]
+        request.server_index = server_index
+        request.header.opcode = opcode
+        if cas:
+            request.header.cas = _htobe64(cas)
+        bodylen = 0
+        if extra:
+            objects.append(extra)
+            bodylen = _ffi.sizeof(extra)
+            request.extra = extra
+            request.header.extlen = bodylen
+        if key is not None:
+            if not isinstance(key, _ffi.CData):
+                key = _ffi.new("unsigned char[]", key)
+                objects.append(key)
+            bodylen += len(key) - 1
+            request.key = key
+            request.header.keylen = socket.htons(len(key) - 1)
+        if data is not None:
+            if not isinstance(data, _ffi.CData):
+                data = _ffi.new("unsigned char[]", data)
+                objects.append(data)
+            bodylen += len(data) - 1
+            request.data = data
+        request.header.bodylen = socket.htonl(bodylen)
+        return requests, objects
+
+    @_omc_command
+    def noop(self, server_index=0, timeout=None):
+        return self._request(CMD_NOOP, server_index=server_index)
+
+    def stat(self, command="", server_index=0, timeout=None):
+        req, objs = self._request(CMD_STAT, key=_to_bytes(command), server_index=server_index)
+        timeout = timeout if timeout is not None else self.io_timeout
+        resps = self._omc_command_async(req, 100, timeout, "stat")
+        results = {}
+        for resp in resps:
+            self._omc_check(resp.status, "stat")
+            if not resp.key and not resp.value:
+                break
+            results[resp.key] = resp.value
+        return results
+
+    @_omc_command
+    def _omc_set(self, key, value, expiration, flags, cas, timeout, opcode, func_name):
+        extra = _ffi.new("uint32_t[]", 2)
+        extra[0] = socket.htonl(flags)
+        extra[1] = socket.htonl(expiration)
+        return self._request(CMD_SET, key=_to_bytes(key), data=_to_bytes(value), extra=extra, cas=cas)
+
     def set(self, key, value, expiration=0, flags=0, cas=0, timeout=None):
-        key = _to_bytes(key)
-        value = _to_bytes(value)
-        timeout = timeout if timeout is not None else self.io_timeout
-        return _oc.omcache_set(self.omc, key, len(key), value, len(value), expiration, flags, cas, timeout)
+        return self._omc_set(key, value, expiration, flags, cas, timeout, CMD_SET, "set")
 
-    @_omc_return("omcache_add")
     def add(self, key, value, expiration=0, flags=0, timeout=None):
-        key = _to_bytes(key)
-        value = _to_bytes(value)
-        timeout = timeout if timeout is not None else self.io_timeout
-        return _oc.omcache_add(self.omc, key, len(key), value, len(value), expiration, flags, timeout)
+        return self._omc_set(key, value, expiration, flags, 0, timeout, CMD_ADD, "add")
 
-    @_omc_return("omcache_replace")
     def replace(self, key, value, expiration=0, flags=0, timeout=None):
-        key = _to_bytes(key)
-        value = _to_bytes(value)
-        timeout = timeout if timeout is not None else self.io_timeout
-        return _oc.omcache_replace(self.omc, key, len(key), value, len(value), expiration, flags, timeout)
+        return self._omc_set(key, value, expiration, flags, 0, timeout, CMD_REPLACE, "replace")
 
-    @_omc_return("omcache_append")
     def append(self, key, value, cas=0, timeout=None):
-        key = _to_bytes(key)
-        value = _to_bytes(value)
-        timeout = timeout if timeout is not None else self.io_timeout
-        return _oc.omcache_append(self.omc, key, len(key), value, len(value), cas, timeout)
+        return self._omc_set(key, value, 0, 0, cas, timeout, CMD_APPEND, "append")
 
-    @_omc_return("omcache_prepend")
     def prepend(self, key, value, cas=0, timeout=None):
-        key = _to_bytes(key)
-        value = _to_bytes(value)
-        timeout = timeout if timeout is not None else self.io_timeout
-        return _oc.omcache_prepend(self.omc, key, len(key), value, len(value), cas, timeout)
+        return self._omc_set(key, value, 0, 0, cas, timeout, CMD_PREPEND, "prepend")
 
-    @_omc_return("omcache_delete")
+    @_omc_command
     def delete(self, key, timeout=None):
-        key = _to_bytes(key)
-        timeout = timeout if timeout is not None else self.io_timeout
-        return _oc.omcache_delete(self.omc, key, len(key), timeout)
+        return self._request(CMD_DELETE, key=_to_bytes(key))
 
-    @_omc_return("omcache_touch")
+    @_omc_command
     def touch(self, key, expiration=0, timeout=None):
-        key = _to_bytes(key)
-        timeout = timeout if timeout is not None else self.io_timeout
-        return _oc.omcache_touch(self.omc, key, len(key), expiration, timeout)
+        extra = _ffi.new("uint32_t[]", 1)
+        extra[0] = socket.htonl(expiration)
+        return self._request(CMD_TOUCH, key=_to_bytes(key), extra=extra)
 
     def get(self, key, flags=False, cas=False, timeout=None):
-        key = _to_bytes(key)
+        req, objs = self._request(CMD_GETK, _to_bytes(key))
         timeout = timeout if timeout is not None else self.io_timeout
-        ret = _oc.omcache_get(self.omc, key, len(key), _cucpp, _sizep,
-                              _u32p if flags else _ffi.NULL,
-                              _u64p if cas else _ffi.NULL, timeout)
-        buf = self._omc_check("omcache_get", ret, return_buffer=True)
+        resp = self._omc_command_async(req, None, timeout, "get")[0]
+        self._omc_check(resp.status, "get")
         if not flags and not cas:
-            return buf
+            return resp.value
         elif flags and cas:
-            return (buf, _u32p[0], _u64p[0])
+            return (resp.value, resp.flags, resp.cas)
         elif flags:
-            return (buf, _u32p[0])
+            return (resp.value, resp.flags)
         elif cas:
-            return (buf, _u64p[0])
+            return (resp.value, resp.cas)
 
     def get_multi(self, keys, flags=False, cas=False, timeout=None):
-        keys = [_to_bytes(key) for key in keys]
-        ckeys = [_ffi.new("unsigned char[]", key) for key in keys]
-        key_lens = [len(key) for key in keys]
-        # send all requests but don't look for responses yet
+        if not isinstance(keys, (list, tuple)):
+            keys = list(keys)
+        objects = []
         requests = _ffi.new("omcache_req_t[]", len(keys))
-        request_count = _sizep2
-        request_count[0] = len(keys)
-        ret = _oc.omcache_get_multi(self.omc, ckeys, key_lens, len(keys),
-                                    requests, request_count, _ffi.NULL, _ffi.NULL, 0)
-        self._omc_check("omcache_get_multi", ret, allowed=[_oc.OMCACHE_OK, _oc.OMCACHE_AGAIN, _oc.OMCACHE_BUFFERED])
-        # now look for responses
+        for i in range(len(keys)):
+            self._request(CMD_GETKQ, _to_bytes(keys[i]), request=requests[i], objects=objects)
         timeout = timeout if timeout is not None else self.io_timeout
-        values = _ffi.new("omcache_value_t[]", len(keys))
-        value_count = _sizep
+        resps = self._omc_command_async(requests, None, timeout, "get_multi")
         results = {}
-        while request_count[0]:
-            value_count[0] = len(keys)
-            ret = _oc.omcache_io(self.omc, requests, request_count, values, value_count, timeout)
-            self._omc_check("omcache_io", ret, allowed=[_oc.OMCACHE_OK, _oc.OMCACHE_AGAIN])
-            for i in range(value_count[0]):
-                if values[i].status != _oc.OMCACHE_OK:
-                    continue
-                key = _ffi.buffer(values[i].key, values[i].key_len)[:]
-                value = _ffi.buffer(values[i].data, values[i].data_len)[:]
-                if flags and cas:
-                    value = (value, values[i].flags, values[i].cas)
-                elif flags:
-                    value = (value, values[i].flags)
-                elif cas:
-                    value = (value, values[i].cas)
-                results[key] = value
+        for resp in resps:
+            if resp.status != _oc.OMCACHE_OK:
+                continue
+            if flags and cas:
+                results[resp.key] = (resp.value, resp.flags, resp.cas)
+            elif flags:
+                results[resp.key] = (resp.value, resp.flags)
+            elif cas:
+                results[resp.key] = (resp.value, resp.cas)
+            else:
+                results[resp.key] = resp.value
         return results
 
-    def increment(self, key, delta=1, initial=None, expiration=0, timeout=None):
+    def _omc_delta(self, key, delta, initial, expiration, timeout, func_name):
         # Delta operation definition in the protocol is a bit weird; if
         # 'expiration' is set to DELTA_NO_ADD (0xffffffff) the value will
         # not be created if it doesn't exist yet, but since we have a
@@ -363,30 +467,33 @@ class OMcache(object):
         # and expiration is empty and throw an error if initial is None but
         # expiration isn't empty.
 
+        if delta < 0:
+            opcode = CMD_DECREMENT
+            delta = -delta
+        else:
+            opcode = CMD_INCREMENT
         if initial is None:
             if expiration:
-                raise Error("increment operation's initial must be set if expiration time is used")
+                raise Error(func_name + " operation's initial must be set if expiration time is used")
             expiration = DELTA_NO_ADD
             initial = 0
-        key = _to_bytes(key)
+        # CFFI doesn't support packed structs before version 0.8.2 so we create
+        # an array of 5 x uint32_s instead of 2 x uint64_t + 1 x uint32_t
+        extra = _ffi.new("uint32_t[]", 5)
+        extra[0] = socket.htonl(delta >> 32)
+        extra[1] = socket.htonl(delta & 0xffffffff)
+        if initial:
+            extra[2] = socket.htonl(initial >> 32)
+            extra[3] = socket.htonl(initial & 0xffffffff)
+        extra[4] = socket.htonl(expiration)
+        req, objs = self._request(opcode, key=_to_bytes(key), extra=extra)
         timeout = timeout if timeout is not None else self.io_timeout
-        ret = _oc.omcache_increment(self.omc, key, len(key), delta, initial, expiration, _u64p, timeout)
-        ret = self._omc_check("omcache_increment", ret)
-        if ret != _oc.OMCACHE_OK:
-            return None
-        return _u64p[0]
+        resps = self._omc_command_async(req, 1, timeout, func_name)
+        self._omc_check(resps[0].status, func_name)
+        return resps[0].delta_value
+
+    def increment(self, key, delta=1, initial=None, expiration=0, timeout=None):
+        return self._omc_delta(key, delta, initial, expiration, timeout, "increment")
 
     def decrement(self, key, delta=1, initial=None, expiration=0, timeout=None):
-        # see the comment in increment()
-        if initial is None:
-            if expiration:
-                raise Error("decrement operation's initial must be set if expiration time is used")
-            expiration = DELTA_NO_ADD
-            initial = 0
-        key = _to_bytes(key)
-        timeout = timeout if timeout is not None else self.io_timeout
-        ret = _oc.omcache_decrement(self.omc, key, len(key), delta, initial, expiration, _u64p, timeout)
-        ret = self._omc_check("omcache_decrement", ret)
-        if ret != _oc.OMCACHE_OK:
-            return None
-        return _u64p[0]
+        return self._omc_delta(key, -delta, initial, expiration, timeout, "decrement")
