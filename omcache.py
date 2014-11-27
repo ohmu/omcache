@@ -114,6 +114,7 @@ def _to_bytes(s):
         return s.encode("utf8")
     return s
 
+
 def _to_string(s):
     msg = _ffi.string(s)
     if version_info[0] >= 3 and isinstance(msg, bytes):
@@ -131,6 +132,21 @@ else:
 
 
 OMcacheValue = namedtuple("OMcacheValue", ["status", "key", "value", "flags", "cas", "delta_value"])
+
+
+def _omc_command(func, expected_values=1):
+    @wraps(func)
+    def omc_async_call(self, *args, **kwargs):
+        func_name = kwargs.get("func_name", func.__name__)
+        timeout = kwargs.pop("timeout", self.io_timeout)
+        # `objs` holds references to CFFI objects which we need to hold for a while
+        req, objs = func(self, *args, **kwargs)  # pylint: disable=W0612
+        if self.select == select_select:
+            ret = _oc.omcache_command_status(self.omc, req, timeout)
+            return self._omc_check(ret, func_name)
+        resp = self._omc_command_async(req, expected_values, timeout, func_name)[0]
+        return self._omc_check(resp.status, func_name)
+    return omc_async_call
 
 
 class OMcache(object):
@@ -193,7 +209,8 @@ class OMcache(object):
         _oc.omcache_set_log_callback(self.omc, level, log_cb, _ffi.NULL)
 
     @staticmethod
-    def _omc_check(ret, name, allowed=[_oc.OMCACHE_BUFFERED]):
+    def _omc_check(ret, name, allowed=None):
+        allowed = allowed if allowed is not None else [_oc.OMCACHE_BUFFERED]
         if ret == _oc.OMCACHE_OK or ret in allowed:
             return ret
         if ret == _oc.OMCACHE_NOT_FOUND:
@@ -312,19 +329,6 @@ class OMcache(object):
             results.extend(self._omc_io(requests, request_count, values, value_countp, time_left))
         return results
 
-    def _omc_command(func, expected_values=1):
-        @wraps(func)
-        def omc_async_call(self, *args, **kwargs):
-            func_name = kwargs.get("func_name", func.__name__)
-            timeout = kwargs.pop("timeout", self.io_timeout)
-            req, objs = func(self, *args, **kwargs)
-            if self.select == select_select:
-                ret = _oc.omcache_command_status(self.omc, req, timeout)
-                return self._omc_check(ret, func_name)
-            resp = self._omc_command_async(req, expected_values, timeout, func_name)[0]
-            return self._omc_check(resp.status, func_name)
-        return omc_async_call
-
     def flush(self, timeout=-1):
         if self.select == select_select:
             ret = _oc.omcache_io(self.omc, _ffi.NULL, _ffi.NULL, _ffi.NULL, _ffi.NULL, timeout)
@@ -376,7 +380,8 @@ class OMcache(object):
         return self._request(CMD_NOOP, server_index=server_index)
 
     def stat(self, command="", server_index=0, timeout=None):
-        req, objs = self._request(CMD_STAT, key=_to_bytes(command), server_index=server_index)
+        # `objs` holds references to CFFI objects which we need to hold for a while
+        req, objs = self._request(CMD_STAT, key=_to_bytes(command), server_index=server_index)  # pylint: disable=W0612
         timeout = timeout if timeout is not None else self.io_timeout
         resps = self._omc_command_async(req, 100, timeout, "stat")
         results = {}
@@ -420,7 +425,8 @@ class OMcache(object):
         return self._request(CMD_TOUCH, key=_to_bytes(key), extra=extra)
 
     def get(self, key, flags=False, cas=False, timeout=None):
-        req, objs = self._request(CMD_GETK, _to_bytes(key))
+        # `objs` holds references to CFFI objects which we need to hold for a while
+        req, objs = self._request(CMD_GETK, _to_bytes(key))  # pylint: disable=W0612
         timeout = timeout if timeout is not None else self.io_timeout
         resp = self._omc_command_async(req, None, timeout, "get")[0]
         self._omc_check(resp.status, "get")
@@ -486,7 +492,8 @@ class OMcache(object):
             extra[2] = socket.htonl(initial >> 32)
             extra[3] = socket.htonl(initial & 0xffffffff)
         extra[4] = socket.htonl(expiration)
-        req, objs = self._request(opcode, key=_to_bytes(key), extra=extra)
+        # `objs` holds references to CFFI objects which we need to hold for a while
+        req, objs = self._request(opcode, key=_to_bytes(key), extra=extra)  # pylint: disable=W0612
         timeout = timeout if timeout is not None else self.io_timeout
         resps = self._omc_command_async(req, 1, timeout, func_name)
         self._omc_check(resps[0].status, func_name)

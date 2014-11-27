@@ -96,3 +96,6 @@ check-coverity:
 		--form 'description=$(short_ver)' \
 		'https://scan.coverity.com/builds?project=saaros%2Fomcache'
 	$(RM) -r cov-int omcache-cov-int.tar.gz
+
+check-pylint:
+	pylint --rcfile pylintrc *.py

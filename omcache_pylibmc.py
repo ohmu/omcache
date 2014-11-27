@@ -86,11 +86,11 @@ class Client(omcache.OMcache):
     @staticmethod
     def _deserialize_value(value, flags):
         if flags & (PYLIBMC_FLAG_PICKLE | PYLIBMC_FLAG_ZLIB):
-            warnings.warn("Ignoring cache value for {0!r} with unsupported flags 0x{1:x}".format(key, flags))
+            warnings.warn("Ignoring cache value {0!r} with unsupported flags 0x{1:x}".format(value, flags))
             return None
-        if flags & (PYLIBMC_FLAG_INT | PYLIBMC_FLAG_LONG):
+        elif flags & (PYLIBMC_FLAG_INT | PYLIBMC_FLAG_LONG):
             return int(value)
-        if flags & PYLIBMC_FLAG_BOOL:
+        elif flags & PYLIBMC_FLAG_BOOL:
             return bool(value)
         return value
 
@@ -175,7 +175,7 @@ class Client(omcache.OMcache):
                 value, flags = _s_value(value)
                 super(Client, self).set(prefixed_key, value, flags=flags,
                                         expiration=time, timeout=0)
-            except omcache.CommandError as ex:
+            except omcache.CommandError:
                 failed.append(key)
         return failed
 
@@ -198,6 +198,6 @@ class Client(omcache.OMcache):
             try:
                 prefixed_key = "{0}{1}".format(key_prefix or "", key)
                 super(Client, self).delete(prefixed_key, timeout=0)
-            except omcache.CommandError as ex:
+            except omcache.CommandError:
                 success = False
         return success
