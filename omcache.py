@@ -143,9 +143,10 @@ def _omc_command(func, expected_values=1):
         req, objs = func(self, *args, **kwargs)  # pylint: disable=W0612
         if self.select == select_select:
             ret = _oc.omcache_command_status(self.omc, req, timeout)
-            return self._omc_check(ret, func_name)
-        resp = self._omc_command_async(req, expected_values, timeout, func_name)[0]
-        return self._omc_check(resp.status, func_name)
+        else:
+            resps = self._omc_command_async(req, expected_values, timeout, func_name)
+            ret = resps[0].status if resps else _oc.OMCACHE_FAIL
+        return self._omc_check(ret, func_name)
     return omc_async_call
 
 
@@ -428,8 +429,10 @@ class OMcache(object):
         # `objs` holds references to CFFI objects which we need to hold for a while
         req, objs = self._request(CMD_GETK, _to_bytes(key))  # pylint: disable=W0612
         timeout = timeout if timeout is not None else self.io_timeout
-        resp = self._omc_command_async(req, None, timeout, "get")[0]
-        self._omc_check(resp.status, "get")
+        resps = self._omc_command_async(req, None, timeout, "get")
+        ret = resps[0].status if resps else _oc.OMCACHE_NOT_FOUND
+        self._omc_check(ret, "get")
+        resp = resps[0]
         if not flags and not cas:
             return resp.value
         elif flags and cas:
@@ -496,7 +499,8 @@ class OMcache(object):
         req, objs = self._request(opcode, key=_to_bytes(key), extra=extra)  # pylint: disable=W0612
         timeout = timeout if timeout is not None else self.io_timeout
         resps = self._omc_command_async(req, 1, timeout, func_name)
-        self._omc_check(resps[0].status, func_name)
+        ret = resps[0].status if resps else _oc.OMCACHE_FAIL
+        self._omc_check(ret, func_name)
         return resps[0].delta_value
 
     def increment(self, key, delta=1, initial=None, expiration=0, timeout=None):
