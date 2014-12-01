@@ -88,9 +88,12 @@ START_TEST(test_suspended_memcache)
   begin = ot_msec();
   ck_omcache(omcache_get(oc, (cuc *) strbuf, key_len, &val, &val_len, NULL, NULL, -1), OMCACHE_NOT_FOUND);
   ck_assert_int_le(ot_msec() - begin, 500);
-  // perform one more 'dummy' call to allow connection to re-establish itself
-  (void) omcache_get(oc, (cuc *) strbuf, key_len, &val, &val_len, NULL, NULL, -1);
-  ck_omcache_ok(omcache_get(oc, (cuc *) strbuf, key_len, &val, &val_len, NULL, NULL, -1));
+  // try to read the value a few times, this can fail a few more times
+  // before the connection has been recreated and confirmed
+  int ret = -1;
+  for (int i = 0; (i < 10) && (ret != OMCACHE_OK); i ++)
+    ret = omcache_get(oc, (cuc *) strbuf, key_len, &val, &val_len, NULL, NULL, -1);
+  ck_assert_int_eq(ret, OMCACHE_OK);
   ck_assert_int_eq(susp_server_index, omcache_server_index_for_key(oc, (cuc *) strbuf, key_len));
 
   omcache_free(oc);
