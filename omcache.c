@@ -756,7 +756,6 @@ static int omc_srv_connect(omcache_t *mc, omc_srv_t *srv)
               hints.ai_flags = AI_ADDRCONFIG;
 #ifdef WITH_ASYNCNS
               srv->nsq = asyncns_getaddrinfo(mc->ans, srv->hostname, srv->port, &hints);
-              omc_srv_log(LOG_WARNING, srv, "async getaddrinfo: %p", srv->nsq);
               srv->last_gai = now;
               return OMCACHE_AGAIN;
 #else // WITH_ASYNCNS
