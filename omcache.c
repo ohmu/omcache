@@ -85,6 +85,7 @@ typedef struct omc_srv_s
   uint32_t active_requests;
   omc_buf_t send_buffer;
   omc_buf_t recv_buffer;
+  uint32_t keep_recv_buffer_iteration;
   bool disabled;
   bool connected;
   int64_t retry_at;
@@ -140,6 +141,7 @@ struct omcache_s
   struct
   {
     bool active;
+    uint32_t iteration;
     uint32_t min_req;
     uint32_t max_req;
     uint32_t count;
@@ -964,13 +966,13 @@ static int omc_buffer_realloc(omc_buf_t *buf, size_t buf_max, uint32_t required)
   return OMCACHE_OK;
 }
 
-static int omc_do_read(omcache_t *mc, omc_srv_t *srv, size_t msg_size, bool keep_buffers)
+static int omc_do_read(omcache_t *mc, omc_srv_t *srv, size_t msg_size)
 {
   // make sure we have room for at least the requested bytes, but read as much as possible
   size_t space = srv->recv_buffer.end - srv->recv_buffer.w;
   if (space < msg_size)
     {
-      if (keep_buffers)
+      if (srv->keep_recv_buffer_iteration == mc->lookup.iteration)
         return OMCACHE_BUFFER_FULL;
       if (omc_buffer_realloc(&srv->recv_buffer, mc->recv_buffer_max, msg_size) != OMCACHE_OK)
         return OMCACHE_BUFFER_FULL;
@@ -997,15 +999,22 @@ static int omc_do_read(omcache_t *mc, omc_srv_t *srv, size_t msg_size, bool keep
 static int omc_srv_read(omcache_t *mc, omc_srv_t *srv)
 {
   protocol_binary_response_header stack_header;
-  bool keep_buffers = false;
   int ret = OMCACHE_OK;
+
+  // reset read buffer in case everything was processed
+  if (srv->recv_buffer.r == srv->recv_buffer.w &&
+      srv->keep_recv_buffer_iteration != mc->lookup.iteration)
+    {
+      srv->recv_buffer.r = srv->recv_buffer.base;
+      srv->recv_buffer.w = srv->recv_buffer.base;
+    }
 
   // handle as many messages as possible
   for (int i=0; ret == OMCACHE_OK; i++)
     {
       if (i == 0 || srv->recv_buffer.r == srv->recv_buffer.w)
         {
-          ret = omc_do_read(mc, srv, 255, keep_buffers);
+          ret = omc_do_read(mc, srv, 255);
           continue;
         }
 
@@ -1041,8 +1050,8 @@ static int omc_srv_read(omcache_t *mc, omc_srv_t *srv)
                         i, buffered, msg_size);
           // read more data if possible, in case we're asked to not move the
           // buffer this may fail and the caller needs to try again later.
-          ret = omc_do_read(mc, srv, msg_size - buffered, keep_buffers);
-          if (ret == OMCACHE_BUFFER_FULL && !keep_buffers)
+          ret = omc_do_read(mc, srv, msg_size - buffered);
+          if (ret == OMCACHE_BUFFER_FULL && srv->keep_recv_buffer_iteration != mc->lookup.iteration)
             {
               // the message is too big to fit in our receive buffer at all,
               // discard it (by resetting connection.)
@@ -1133,18 +1142,14 @@ static int omc_srv_read(omcache_t *mc, omc_srv_t *srv)
       if (omc_return_value(mc, srv, &value, hdr->response.opaque, multi_req))
         {
           // don't overwrite the buffer to avoid overwriting the response
-          keep_buffers = true;
+          srv->keep_recv_buffer_iteration = mc->lookup.iteration;
         }
     }
-  // reset read buffer in case everything was processed
-  if (srv->recv_buffer.r == srv->recv_buffer.w)
-    {
-      srv->recv_buffer.r = srv->recv_buffer.base;
-      srv->recv_buffer.w = srv->recv_buffer.base;
-    }
-  if (srv->last_req_recvd >= srv->last_req_sent_nq)
-    return OMCACHE_OK;
-  return OMCACHE_AGAIN;
+  if (ret == OMCACHE_BUFFER_FULL)
+    return ret;
+  if (srv->last_req_recvd < srv->last_req_sent_nq)
+    return OMCACHE_AGAIN;
+  return OMCACHE_OK;
 }
 
 // try to write/connect if there's pending data to this server.  read any
@@ -1217,6 +1222,7 @@ int omcache_io(omcache_t *mc,
   int64_t now = omc_msec();
   int64_t timeout_abs = (timeout_msec > 0) ? now + timeout_msec : timeout_msec;
 
+  mc->lookup.iteration ++;
   if (reqs && req_count && *req_count)
     {
       if (!(reqs[0].header.opaque == mc->lookup.min_req &&
@@ -1270,7 +1276,7 @@ int omcache_io(omcache_t *mc,
       omc_debug("poll(%d, %d): %d %s", nfds, timeout_poll, polls, polls == -1 ? strerror(errno) : "");
       now = omc_msec();
       bool found_new_names = false;
-      for (int i = 0; (i < nfds) && (ret == OMCACHE_OK || ret == OMCACHE_AGAIN); i++)
+      for (int i = 0; i < nfds; i++)
         {
 #ifdef WITH_ASYNCNS
           if (pfds[i].fd == mc->ans_fd)
@@ -1307,15 +1313,23 @@ int omcache_io(omcache_t *mc,
             }
           ret = omc_srv_io(mc, srv);
           omc_srv_debug(srv, "io: %s", omcache_strerror(ret));
+          if (!(ret == OMCACHE_OK || ret == OMCACHE_AGAIN || ret == OMCACHE_BUFFER_FULL))
+            break;
         }
 
-      // break the loop if we found any responses: the receive buffer could be
-      // overwritten by new calls to omc_srv_io so we need to allow the
-      // caller to process the response before resuming reads.
-      if (mc->lookup.active && (mc->lookup.values_returned || mc->lookup.found == mc->lookup.count))
+      // break the loop if the receive buffer is full and we can't
+      // reallocate it because we've returned pointers to it or if we've
+      // found al the responses.
+      if (ret == OMCACHE_BUFFER_FULL)
+        {
+          omc_debug("%s", "receive buffer full, breaking loop");
+          ret = OMCACHE_AGAIN;
+          break;
+        }
+      if (mc->lookup.active && mc->lookup.found == mc->lookup.count)
         {
           omc_debug("returned %zu responses, breaking loop", mc->lookup.values_returned);
-          ret = (mc->lookup.found == mc->lookup.count) ? OMCACHE_OK : OMCACHE_AGAIN;
+          ret = OMCACHE_OK;
           break;
         }
 
@@ -1564,6 +1578,7 @@ int omcache_command(omcache_t *mc,
 
   // set up response lookup table
   mc->lookup.active = false;
+  mc->lookup.iteration ++;
   mc->lookup.count = 0;
   mc->lookup.found = 0;
   mc->lookup.min_req = UINT32_MAX;
