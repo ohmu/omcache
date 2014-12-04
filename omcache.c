@@ -52,8 +52,8 @@
 #  define omc_debug(...) omc_log(LOG_DEBUG, __VA_ARGS__)
 #  define omc_srv_debug(...) omc_srv_log(LOG_DEBUG, __VA_ARGS__)
 #else
-#  define omc_debug(...)
-#  define omc_srv_debug(...)
+#  define omc_debug(...) do {} while(0)
+#  define omc_srv_debug(...) do {} while(0)
 #endif
 
 
@@ -933,7 +933,12 @@ static uint32_t omc_lookup_discard_requests(omcache_t *mc, omc_srv_t *srv, uint3
               }
           }
       }
-  omc_log(LOG_NOTICE, "discarded %u requests", discarded);
+  // log a differnet message if we're discarding everything and when we're
+  // discarding quiet messages when seeing a no-op
+  if (max_req == UINT32_MAX)
+    omc_log(LOG_NOTICE, "discarded %u requests", discarded);
+  else
+    omc_debug("discarded %u quiet requests", discarded);
   return discarded;
 }
 
