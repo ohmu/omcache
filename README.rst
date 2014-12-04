@@ -1,5 +1,8 @@
-OMcache
+OMcache |BuildStatus|_
 =======
+
+.. |BuildStatus| image:: https://travis-ci.org/saaros/omcache.png?branch=master
+.. _BuildStatus: https://travis-ci.org/saaros/omcache
 
 OMcache is a C and Python library for accessing memcached servers.  The
 goals of the OMcache project are a stable API and ABI and 'easy' integration

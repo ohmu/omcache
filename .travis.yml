@@ -1,0 +1,9 @@
+language: c
+compiler: gcc
+before_install: sudo apt-get install libasyncns-dev check memcached valgrind
+
+script: make && make check check-valgrind
+
+env:
+  - WITHOUT_ASYNCNS=1
+  - WITHOUT_ASYNCNS=
