@@ -1119,10 +1119,11 @@ static int omc_srv_read(omcache_t *mc, omc_srv_t *srv)
       value.data_len = be32toh(hdr->response.bodylen) - hdr->response.extlen - value.key_len;
       value.cas = be64toh(hdr->response.cas);
 
-      if (hdr->response.opcode == PROTOCOL_BINARY_CMD_GET ||
-          hdr->response.opcode == PROTOCOL_BINARY_CMD_GETQ ||
-          hdr->response.opcode == PROTOCOL_BINARY_CMD_GETK ||
-          hdr->response.opcode == PROTOCOL_BINARY_CMD_GETKQ)
+      if (hdr->response.extlen == 4 &&
+          (hdr->response.opcode == PROTOCOL_BINARY_CMD_GET ||
+           hdr->response.opcode == PROTOCOL_BINARY_CMD_GETQ ||
+           hdr->response.opcode == PROTOCOL_BINARY_CMD_GETK ||
+           hdr->response.opcode == PROTOCOL_BINARY_CMD_GETKQ))
         {
           // don't cast recv_buffer to protocol_binary_response_header as
           // that'd require us to realign it properly and in practice we'll
@@ -1132,10 +1133,14 @@ static int omc_srv_read(omcache_t *mc, omc_srv_t *srv)
           value.flags = be32toh(value.flags);
         }
 
-      if (hdr->response.opcode == PROTOCOL_BINARY_CMD_INCREMENT ||
-          hdr->response.opcode == PROTOCOL_BINARY_CMD_DECREMENT ||
-          hdr->response.opcode == PROTOCOL_BINARY_CMD_INCREMENTQ ||
-          hdr->response.opcode == PROTOCOL_BINARY_CMD_DECREMENTQ)
+      // NOTE: increment and decrement commands don't declare the value as
+      // part of extras due to a mismatch in memcached implementation and
+      // documentation: https://github.com/memcached/memcached/pull/92
+      if (body_size == 8 &&
+          (hdr->response.opcode == PROTOCOL_BINARY_CMD_INCREMENT ||
+           hdr->response.opcode == PROTOCOL_BINARY_CMD_DECREMENT ||
+           hdr->response.opcode == PROTOCOL_BINARY_CMD_INCREMENTQ ||
+           hdr->response.opcode == PROTOCOL_BINARY_CMD_DECREMENTQ))
         {
           const unsigned char *b = srv->recv_buffer.r + sizeof(*hdr);
           memcpy(&value.delta_value, b, 8);
