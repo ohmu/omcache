@@ -153,7 +153,7 @@ def _omc_command(func, expected_values=1):
 class OMcache(object):
     def __init__(self, server_list, log=None, select=None):
         self.omc = _oc.omcache_init()
-        self._omc_log_cb = _ffi.callback("void(void*, int, const char *)", self._omc_log)
+        self._log_cb = None
         self._log = None
         self.log = log
         self.select = select or select_select
@@ -170,27 +170,20 @@ class OMcache(object):
             _oc.omcache_free(omc)
             self.omc = None
 
-    def _omc_log(self, context, level, msg):
-        msg = _to_string(msg)
-        if level <= LOG_ERR:
-            self._log.error(msg)
-        elif level == LOG_WARNING:
-            self._log.warning(msg)
-        elif level == LOG_DEBUG:
-            self._log.debug(msg)
-        else:
-            self._log.info(msg)
-
     @property
     def log(self):
         return self._log
 
     @log.setter
     def log(self, log):
-        self._log = log
-        log_cb = self._omc_log_cb if log else _ffi.NULL
         level = 0
-        if log and hasattr(log, "getEffectiveLevel"):
+        self._log = log
+        if not log:
+            self._log_cb = None
+            _oc.omcache_set_log_callback(self.omc, level, _ffi.NULL, _ffi.NULL)
+            return
+
+        if hasattr(log, "getEffectiveLevel"):
             pyloglevel = log.getEffectiveLevel()
             if pyloglevel <= logging.DEBUG:
                 level = LOG_DEBUG
@@ -207,7 +200,19 @@ class OMcache(object):
             else:
                 # OMcache doesn't use anything more severe than LOG_ERR
                 level = LOG_ERR - 1
-        _oc.omcache_set_log_callback(self.omc, level, log_cb, _ffi.NULL)
+
+        def _omc_log(context, level, msg):
+            msg = _to_string(msg)
+            if level <= LOG_ERR:
+                log.error(msg)
+            elif level == LOG_WARNING:
+                log.warning(msg)
+            elif level == LOG_DEBUG:
+                log.debug(msg)
+            else:
+                log.info(msg)
+        self._log_cb = _ffi.callback("void(void*, int, const char *)", _omc_log)
+        _oc.omcache_set_log_callback(self.omc, level, self._log_cb, _ffi.NULL)
 
     @staticmethod
     def _omc_check(ret, name, allowed=None):
