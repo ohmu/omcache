@@ -165,6 +165,9 @@ class OMcache(object):
         self.io_timeout = 1000
 
     def __del__(self):
+        self.free()
+
+    def free(self):
         omc = getattr(self, "omc", None)
         if omc is not None:
             _oc.omcache_free(omc)
@@ -292,7 +295,7 @@ class OMcache(object):
         polltimeoutp = _ffi.new("int *")
         polls = _oc.omcache_poll_fds(self.omc, nfdsp, polltimeoutp)
         rlist, wlist = [], []
-        for i in xrange(nfdsp[0]):
+        for i in range(nfdsp[0]):
             if polls[i].events & POLLIN:
                 rlist.append(polls[i].fd)
             if polls[i].events & POLLOUT:
