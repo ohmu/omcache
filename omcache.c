@@ -1040,10 +1040,20 @@ static int omc_srv_read(omcache_t *mc, omc_srv_t *srv)
           memcpy(&stack_header, srv->recv_buffer.r, msg_size);
           hdr = &stack_header;
         }
-      if (hdr->response.magic != PROTOCOL_BINARY_RES)
+      if (hdr->response.magic != PROTOCOL_BINARY_RES ||
+          hdr->response.datatype != PROTOCOL_BINARY_RAW_BYTES)
         {
           errno = EINVAL;
-          omc_srv_reset(mc, srv, "header");
+          omc_srv_reset(mc, srv, "invalid magic values in header");
+          break;
+        }
+      // note that the sum below can't overflow as extlen is uint8_t and
+      // keylen is uint16_t: they will be promoted to int32_t which is
+      // always wide enough
+      if (hdr->response.extlen + hdr->response.keylen > hdr->response.bodylen)
+        {
+          errno = EINVAL;
+          omc_srv_reset(mc, srv, "extra or key length out of bounds");
           break;
         }
       // check body length (but don't overwrite it in the buffer yet)
