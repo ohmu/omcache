@@ -211,6 +211,10 @@ class OMcache(object):
                 log.error(msg)
             elif level == LOG_WARNING:
                 log.warning(msg)
+            elif level == LOG_NOTICE:
+                # NOTE: python doesn't have NOTICE, but INFO is defined as
+                # 20 and WARNING as 30 so let's use INFO + 1 for NOTICE
+                log.log(logging.INFO + 1, msg)
             elif level == LOG_DEBUG:
                 log.debug(msg)
             else:
