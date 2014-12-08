@@ -1588,14 +1588,6 @@ int omcache_command(omcache_t *mc,
       return ret;
     }
 
-  struct rpsbucket_s
-  {
-    omcache_req_t *reqs;
-    size_t count;
-    size_t size;
-  } reqs_per_server[mc->server_count];
-  memset(reqs_per_server, 0, sizeof(reqs_per_server));
-
   // set up response lookup table
   mc->lookup.active = false;
   mc->lookup.iteration ++;
@@ -1605,56 +1597,61 @@ int omcache_command(omcache_t *mc,
   mc->lookup.max_req = 0;
   mc->lookup.table = omc_hash_table_init(mc->lookup.table, req_count, NULL);
 
-  if (mc->server_count == 1)
-    {
-      reqs_per_server[0].reqs = reqs;
-      reqs_per_server[0].count = req_count;
-    }
-  else
-    {
-      for (size_t i=0; i<req_count; i++)
-        {
-          omcache_req_t *req = &reqs[i];
-          size_t h_keylen = be16toh(req->header.keylen);
-          int server_index = (req->server_index != -1)
-              ? (req->server_index)
-              : omc_ketama_lookup(mc, req->key, h_keylen);
+  // split requests by server
+  struct omc_rps_bucket_s
+  {
+    omcache_req_t *reqs;
+    size_t count;
+    size_t size;
+  } reqs_per_server[mc->server_count];
+  memset(reqs_per_server, 0, sizeof(reqs_per_server));
 
-          if (server_index >= mc->server_count || server_index < 0)
+  for (size_t i = 0; i < req_count; i ++)
+    {
+      omcache_req_t *req = &reqs[i];
+      int server_index = req->server_index;
+
+      if (server_index == -1)
+        server_index = omc_ketama_lookup(mc, req->key, be16toh(req->header.keylen));
+      if (server_index >= mc->server_count || server_index < 0)
+        {
+          if (req->server_index != -1)
+            omc_log(LOG_NOTICE, "dropping request, server index %d is not valid", server_index);
+          ret = OMCACHE_NO_SERVERS;
+          continue;
+        }
+
+      struct omc_rps_bucket_s *rps = &reqs_per_server[server_index];
+      // try to flush out anything pending for the server if this is the
+      // first time we touch it
+      if (rps->count == 0 && mc->buffer_writes == false)
+        {
+          omc_srv_t *srv = mc->servers[server_index];
+          ret = omc_srv_io(mc, srv);
+          omc_srv_debug(srv, "io: %s", omcache_strerror(ret));
+          if (ret != OMCACHE_AGAIN && ret != OMCACHE_OK)
             {
-              if (req->server_index != -1)
-                omc_log(LOG_NOTICE, "dropping request, server index %d is not valid", server_index);
+              omc_srv_log(LOG_NOTICE, srv, "dropping request, flush failed: %s", omcache_strerror(ret));
               ret = OMCACHE_NO_SERVERS;
+              // if we used ketama we'll reschedule the request if the
+              // originally selected server was offlined by omc_srv_io
+              if (req->server_index == -1 && srv->disabled)
+                i --;
               continue;
             }
+          ret = OMCACHE_OK;
+        }
 
-          struct rpsbucket_s *rps = &reqs_per_server[server_index];
-          // try to flush out anything pending for the server if this is the
-          // first time we touch it
-          if (rps->count == 0 && mc->buffer_writes == false)
-            {
-              omc_srv_t *srv = mc->servers[server_index];
-              ret = omc_srv_io(mc, srv);
-              omc_srv_debug(srv, "io: %s", omcache_strerror(ret));
-              if (ret != OMCACHE_AGAIN && ret != OMCACHE_OK)
-                {
-                  omc_srv_log(LOG_NOTICE, srv, "dropping request, flush failed: %s", omcache_strerror(ret));
-                  ret = OMCACHE_NO_SERVERS;
-                  // if we used ketama we'll reschedule the request if the
-                  // originally selected server was offlined by omc_srv_io
-                  if (req->server_index == -1 && srv->disabled)
-                    i --;
-                  continue;
-                }
-              ret = OMCACHE_OK;
-            }
-          if (req_count == 1)
-            {
-              // minor optimization when calling this api with a single request
-              rps->reqs = reqs;
-              rps->count = 1;
-              break;
-            }
+      if (mc->server_count == 1 || req_count == 1)
+        {
+          // optimization for cases where we have a single server or a single request
+          rps->reqs = reqs;
+          rps->count = req_count;
+          if (req->server_index == -1)
+            break;  // if ketama picked a server we don't need to re-check anything
+        }
+      else
+        {
           if (rps->size <= rps->count)
             {
               rps->size += 16;
@@ -1670,7 +1667,7 @@ int omcache_command(omcache_t *mc,
   for (int i = 0; i < mc->server_count; i ++)
     {
       omc_srv_t *srv = mc->servers[i];
-      struct rpsbucket_s *rps = &reqs_per_server[i];
+      struct omc_rps_bucket_s *rps = &reqs_per_server[i];
 
       srv->active_requests = rps->count;
       if (rps->count == 0)
