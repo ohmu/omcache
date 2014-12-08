@@ -8,9 +8,10 @@
 
 from collections import namedtuple
 from functools import wraps
-from select import select as select_select
+from select import select as select_select, error as select_error
 from sys import version_info
 import cffi
+import errno
 import logging
 import os
 import socket
@@ -305,7 +306,11 @@ class OMcache(object):
                 timeout = 0
             else:
                 timeout = min(polltimeoutp[0], timeout) / 1000.0
-            self.select(rlist, wlist, [], timeout)
+            try:
+                self.select(rlist, wlist, [], timeout)
+            except select_error as ex:
+                if ex[0] != errno.EINTR:
+                    raise
         ret = _oc.omcache_io(self.omc, requests, request_count, values, value_count, 0)
         self._omc_check(ret, "omcache_io", allowed=[_oc.OMCACHE_AGAIN])
         if values == _ffi.NULL:
