@@ -89,8 +89,7 @@ typedef struct omc_srv_s
   bool disabled;
   bool connected;
   int64_t retry_at;
-  int64_t last_io_success;
-  int64_t last_io_attempt;
+  int64_t dead_timeout_start;
   int64_t expected_noop;
 } omc_srv_t;
 
@@ -525,7 +524,7 @@ struct pollfd *omcache_poll_fds(omcache_t *mc, int *nfds, int *poll_timeout)
           omc_srv_debug(srv, "polling %d for POLLOUT", srv->sock);
           mc->server_polls[n].events |= POLLOUT;
         }
-      if (mc->server_polls[n].events != 0)
+      if (mc->server_polls[n].events != 0 || srv->conn_timeout > 0)
         {
           if (srv->sock < 0)
             omc_srv_connect(mc, srv);
@@ -533,14 +532,24 @@ struct pollfd *omcache_poll_fds(omcache_t *mc, int *nfds, int *poll_timeout)
           // case it has already expired, set connection timeout to a
           // special value (1) so next time we get here we know we
           // weren't able to establish a connection in time.
-          if (srv->conn_timeout == 1)
-            omc_srv_reset(mc, srv, "timeout waiting for connect");
-          else if (srv->conn_timeout > 0 && now < srv->conn_timeout)
-            *poll_timeout = min(*poll_timeout, srv->conn_timeout - now);
-          else if (srv->conn_timeout > 0)
+          if (srv->conn_timeout > 0)
             {
-              srv->conn_timeout = 1;
-              *poll_timeout = 1;
+              omc_srv_debug(srv, "polling %d for POLLIN (connect)", srv->sock);
+              mc->server_polls[n].events |= POLLIN;
+              if (srv->conn_timeout == 1)
+                {
+                  errno = ETIME;
+                  omc_srv_reset(mc, srv, "timeout waiting for connect");
+                }
+              else if (now >= srv->conn_timeout)
+                {
+                  srv->conn_timeout = 1;
+                  *poll_timeout = 1;
+                }
+              else
+                {
+                  *poll_timeout = min(*poll_timeout, srv->conn_timeout - now);
+                }
             }
           if (srv->sock >= 0)
             {
@@ -631,11 +640,10 @@ static int omc_ketama_lookup(omcache_t *mc, const unsigned char *key, size_t key
             {
               if (now == 0)
                 now = omc_msec();
-              // only attempt io with servers once per millisecond (or once
-              // per API call) unless there's some progress in the connection
-              if (now > selected->srv->retry_at &&
-                  max(now, selected->srv->last_io_success + 1) > selected->srv->last_io_attempt)
+              // only attempt io with servers once per millisecond
+              if (now > selected->srv->retry_at)
                 {
+                  selected->srv->retry_at = now;
                   omc_srv_io(mc, selected->srv);
                 }
             }
@@ -739,11 +747,12 @@ static int omc_srv_connect(omcache_t *mc, omc_srv_t *srv)
         }
 #endif // WITH_ASYNCNS
 
-      // refresh the hosts addresses if we don't have them yet or if we last
-      // refreshed them before we were last connected
-      if (srv->addrs == NULL || srv->last_io_success > srv->last_gai)
+      // clear addresses if we refreshed them more than a minute ago
+      if (now - srv->last_gai > 60000)
+        omc_srv_free_addrs(mc, srv);
+      // refresh the hosts addresses if needed
+      if (srv->addrs == NULL)
         {
-          omc_srv_free_addrs(mc, srv);
           struct addrinfo hints;
           memset(&hints, 0, sizeof(hints));
           hints.ai_socktype = SOCK_STREAM;
@@ -795,7 +804,7 @@ static int omc_srv_connect(omcache_t *mc, omc_srv_t *srv)
             }
           omc_int_hash_table_add(mc->fd_table, sock, srv->list_index);
           err = connect(sock, srv->addrp->ai_addr, srv->addrp->ai_addrlen);
-          srv->last_io_attempt = now;
+          srv->dead_timeout_start = now;
           srv->addrp = srv->addrp->ai_next;
           srv->sock = sock;
           if (err == 0)
@@ -817,7 +826,7 @@ static int omc_srv_connect(omcache_t *mc, omc_srv_t *srv)
       if (srv->sock == -1)
         {
           omc_srv_reset(mc, srv, "no connection established");
-          // disable server if we've walked through the server list and
+          // disable server if we've walked through the address list and
           // weren't able to conncet to any address
           if (srv->addrp == NULL)
             omc_srv_disable(mc, srv);
@@ -832,7 +841,7 @@ static int omc_srv_connect(omcache_t *mc, omc_srv_t *srv)
           if (omc_msec() >= srv->conn_timeout)
             {
               // timeout
-              errno = EAGAIN;
+              errno = ETIME;
               omc_srv_reset(mc, srv, "connection timeout");
             }
           return OMCACHE_AGAIN;
@@ -853,7 +862,8 @@ static int omc_srv_connect(omcache_t *mc, omc_srv_t *srv)
     }
   srv->connected = true;
   srv->conn_timeout = 0;
-  srv->last_io_success = omc_msec();
+  srv->dead_timeout_start = 0;
+  srv->addrp = srv->addrs;
   omc_srv_log(LOG_INFO, srv, "%s", "connected");
   omc_srv_send_noop(mc, srv);
   srv->expected_noop = mc->req_id;
@@ -984,7 +994,6 @@ static int omc_do_read(omcache_t *mc, omc_srv_t *srv, size_t msg_size)
       space = srv->recv_buffer.end - srv->recv_buffer.w;
     }
   ssize_t res = read(srv->sock, srv->recv_buffer.w, space);
-  srv->last_io_attempt = omc_msec();
   if (res <= 0 && errno != EINTR && errno != EAGAIN)
     {
       omc_srv_reset(mc, srv, "read failed");
@@ -995,7 +1004,9 @@ static int omc_do_read(omcache_t *mc, omc_srv_t *srv, size_t msg_size)
   if (res <= 0)
     return OMCACHE_AGAIN;
   srv->recv_buffer.w += res;
-  srv->last_io_success = srv->last_io_attempt;
+  // push back dead timeout as we managed to do some io here
+  srv->dead_timeout_start = omc_msec();
+  srv->retry_at = 0;
   return OMCACHE_OK;
 }
 
@@ -1079,6 +1090,7 @@ static int omc_srv_read(omcache_t *mc, omc_srv_t *srv)
                 }
               omc_return_value(mc, srv, &value, hdr->response.opaque, false);
               errno = EMSGSIZE;
+              srv->expected_noop = 0;  // hack: we don't want to disable this server
               omc_srv_reset(mc, srv, "buffer full - can't handle response");
             }
           continue;
@@ -1169,6 +1181,8 @@ static int omc_srv_read(omcache_t *mc, omc_srv_t *srv)
     return ret;
   if (srv->last_req_recvd < srv->last_req_sent_nq)
     return OMCACHE_AGAIN;
+  // reset dead_timeout counter as nothing is pending anymore
+  srv->dead_timeout_start = 0;
   return OMCACHE_OK;
 }
 
@@ -1177,57 +1191,50 @@ static int omc_srv_read(omcache_t *mc, omc_srv_t *srv)
 // response's 'opaque' matches req_id store that response in *resp.
 static int omc_srv_io(omcache_t *mc, omc_srv_t *srv)
 {
-  bool again_w = false, again_r = false;
-  ssize_t buf_len = srv->send_buffer.w - srv->send_buffer.r;
-
   int ret = omc_srv_connect(mc, srv);
   if (ret != OMCACHE_OK)
     return ret;
 
-  // recalculate buffer length, omc_srv_connect may have modified it
-  buf_len = srv->send_buffer.w - srv->send_buffer.r;
+  ssize_t buf_len = srv->send_buffer.w - srv->send_buffer.r;
   if (buf_len > 0)
     {
       ssize_t res = write(srv->sock, srv->send_buffer.r, buf_len);
-      srv->last_io_attempt = omc_msec();
-      if (res <= 0)
+      if (srv->dead_timeout_start == 0)
+        srv->dead_timeout_start = omc_msec();
+      if (res <= 0 && errno != EINTR && errno != EAGAIN)
         {
-          if (errno != EINTR && errno != EAGAIN)
-            omc_srv_reset(mc, srv, "write failed");
-          // if write to a disabled server (ie on reconnect) would block and
-          // we haven't been able to write for dead_timeout msec we'll kill
-          // the connection and disable the server for a while more
-          if (errno == EAGAIN && srv->disabled &&
-              srv->last_io_attempt - srv->last_io_success >= mc->dead_timeout_msec)
-            omc_srv_reset(mc, srv, "write timed out");
+          omc_srv_reset(mc, srv, "write failed");
           return OMCACHE_SERVER_FAILURE;
         }
       omc_srv_debug(srv, "write %zd bytes of %zd bytes %s",
                     res, buf_len, (res == -1) ? strerror(errno) : "");
-      srv->last_io_success = srv->last_io_attempt;
-      srv->send_buffer.r += res;
-      buf_len -= res;
-      // reset send buffer in case everything was written
-      if (buf_len > 0)
+      if (res > 0)
         {
-          again_w = true;
+          srv->retry_at = 0;
+          srv->send_buffer.r += res;
+          buf_len -= res;
         }
-      else
+      // reset send buffer in case everything was written
+      if (buf_len == 0)
         {
           srv->send_buffer.r = srv->send_buffer.base;
           srv->send_buffer.w = srv->send_buffer.base;
         }
+      else
+        {
+          ret = OMCACHE_AGAIN;
+        }
     }
+
   if (srv->conn_timeout == 0 && srv->sock >= 0 &&
       srv->last_req_recvd < srv->last_req_sent_nq)
     {
-      ret = omc_srv_read(mc, srv);
-      if (ret == OMCACHE_AGAIN)
-        again_r = true;
-      else if (ret != OMCACHE_OK)
-        return ret;
+      int read_ret = omc_srv_read(mc, srv);
+      if (read_ret != OMCACHE_OK)
+        ret = read_ret;
     }
-  return (again_w || again_r) ? OMCACHE_AGAIN : OMCACHE_OK;
+
+  return ret;
 }
 
 // Process writes and reads until we see a response to req_id or until
@@ -1323,10 +1330,10 @@ int omcache_io(omcache_t *mc,
             }
           if (!pfds[i].revents)
             {
-              // reset connections that have failed
-              if (now - srv->last_io_attempt >= mc->dead_timeout_msec)
+              // reset connections that have timed out
+              if (srv->dead_timeout_start && now - srv->dead_timeout_start >= mc->dead_timeout_msec)
                 {
-                  errno = ETIMEDOUT;
+                  errno = ETIME;
                   omc_srv_reset(mc, srv, "io timeout");
                 }
               continue;
@@ -1447,14 +1454,9 @@ static int omc_srv_submit(omcache_t *mc, omc_srv_t *srv,
   if (srv->connected && mc->buffer_writes == false && buf_len == 0)
     {
       res = writev(srv->sock, iov, iov_cnt);
-      srv->last_io_attempt = omc_msec();
-      if (res > 0)
-        {
-          srv->last_io_success = srv->last_io_attempt;
-          omc_srv_debug(srv, "writev sent %s requests",
-                        res == msg_len ? "all" : "some");
-        }
-      if (res == -1 && errno != EINTR && errno != EAGAIN)
+      if (srv->dead_timeout_start == 0)
+        srv->dead_timeout_start = omc_msec();
+      if (res <= 0 && errno != EINTR && errno != EAGAIN)
         {
           omc_srv_reset(mc, srv, "writev failed");
         }
