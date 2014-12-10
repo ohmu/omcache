@@ -797,6 +797,12 @@ static int omc_srv_connect(omcache_t *mc, omc_srv_t *srv)
               close(sock);
               sock = -1;
             }
+          else if (fcntl(sock, F_SETFD, FD_CLOEXEC) < 0)
+            {
+              omc_srv_reset(mc, srv, "fcntl(sock, F_SETFD, FD_CLOEXEC)");
+              close(sock);
+              sock = -1;
+            }
           if (sock < 0)
             {
               omc_srv_disable(mc, srv);
@@ -1198,7 +1204,7 @@ static int omc_srv_io(omcache_t *mc, omc_srv_t *srv)
   ssize_t buf_len = srv->send_buffer.w - srv->send_buffer.r;
   if (buf_len > 0)
     {
-      ssize_t res = write(srv->sock, srv->send_buffer.r, buf_len);
+      ssize_t res = send(srv->sock, srv->send_buffer.r, buf_len, MSG_NOSIGNAL);
       if (srv->dead_timeout_start == 0)
         srv->dead_timeout_start = omc_msec();
       if (res <= 0 && errno != EINTR && errno != EAGAIN)
@@ -1453,7 +1459,8 @@ static int omc_srv_submit(omcache_t *mc, omc_srv_t *srv,
   // established and the existing write buffer empty
   if (srv->connected && mc->buffer_writes == false && buf_len == 0)
     {
-      res = writev(srv->sock, iov, iov_cnt);
+      struct msghdr msg = { .msg_iov = iov, .msg_iovlen = iov_cnt };
+      res = sendmsg(srv->sock, &msg, MSG_NOSIGNAL);
       if (srv->dead_timeout_start == 0)
         srv->dead_timeout_start = omc_msec();
       if (res <= 0 && errno != EINTR && errno != EAGAIN)
