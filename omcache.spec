@@ -3,7 +3,7 @@ Version:        %{major_version}
 Release:        %{minor_version}%{?dist}
 Summary:        memcache client library
 Group:          System Environment/Libraries
-URL:            https://github.com/saaros/omcache/
+URL:            https://github.com/ohmu/omcache/
 License:        ASL 2.0
 Source0:        omcache-rpm-src.tar.gz
 BuildRequires:  check-devel, libasyncns-devel

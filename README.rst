@@ -1,8 +1,8 @@
 OMcache |BuildStatus|_
 =======
 
-.. |BuildStatus| image:: https://travis-ci.org/saaros/omcache.png?branch=master
-.. _BuildStatus: https://travis-ci.org/saaros/omcache
+.. |BuildStatus| image:: https://travis-ci.org/ohmu/omcache.png?branch=master
+.. _BuildStatus: https://travis-ci.org/ohmu/omcache
 
 OMcache is a C and Python library for accessing memcached servers.  The
 goals of the OMcache project are a stable API and ABI and 'easy' integration
@@ -69,7 +69,8 @@ http://opensource.org/licenses/Apache-2.0 .
 Credits
 =======
 
-OMcache was created and is maintained by Oskari Saarenmaa <os@ohmu.fi>.
+OMcache was created by Oskari Saarenmaa <os@ohmu.fi> and is maintained by
+Ohmu Ltd's hackers <opensource@ohmu.fi>.
 
 F-Secure Corporation provided the infrastructure for testing OMcache in its
 initial development process and contributed to the pylibmc and libmemcached
@@ -83,4 +84,4 @@ Contact
 =======
 
 Bug reports and patches are very welcome, please post them as GitHub issues
-and pull requests at https://github.com/saaros/omcache
+and pull requests at https://github.com/ohmu/omcache

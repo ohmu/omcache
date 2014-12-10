@@ -1,6 +1,6 @@
 Format: http://dep.debian.net/deps/dep5
 Upstream-Name: omcache
-Source: https://github.com/saaros/omcache/
+Source: https://github.com/ohmu/omcache/
 
 Files: *
 Copyright: 2013-2014 Oskari Saarenmaa <os@ohmu.fi>

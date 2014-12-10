@@ -4,7 +4,7 @@ Priority: extra
 Maintainer: Oskari Saarenmaa <os@ohmu.fi>
 Build-Depends: debhelper (>= 8), python-support, check, libasyncns-dev
 Standards-Version: 3.9.5
-Homepage: https://github.com/saaros/omcache/
+Homepage: https://github.com/ohmu/omcache/
 
 Package: libomcache0
 Architecture: any
