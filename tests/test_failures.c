@@ -92,7 +92,11 @@ START_TEST(test_suspended_memcache)
   // before the connection has been recreated and confirmed
   int ret = -1;
   for (int i = 0; (i < 10) && (ret != OMCACHE_OK); i ++)
-    ret = omcache_get(oc, (cuc *) strbuf, key_len, &val, &val_len, NULL, NULL, -1);
+    {
+      if (i != 0 && ret != OMCACHE_OK)
+        usleep(100000);
+      ret = omcache_get(oc, (cuc *) strbuf, key_len, &val, &val_len, NULL, NULL, -1);
+    }
   ck_assert_int_eq(ret, OMCACHE_OK);
   ck_assert_int_eq(susp_server_index, omcache_server_index_for_key(oc, (cuc *) strbuf, key_len));
 
