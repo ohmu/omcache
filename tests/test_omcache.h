@@ -35,6 +35,10 @@
 #define ck_assert_ptr_eq(X, Y) _ck_assert_int(X, ==, Y)
 #define ck_assert_ptr_ne(X, Y) _ck_assert_int(X, !=, Y)
 #define ck_omcache(c,e) ({ int omc_ret = (c); ck_assert_int_eq(omc_ret, (e)); })
+#define srunner_set_log(r,f) fprintf(stderr, "Check < 0.9.10 does not support logging to stdout.\n")
+#define srunner_run(r,s,c,v) ({ \
+  fprintf(stderr, "Check < 0.9.10 does not support selective running of tests.\n"); \
+  abort(); })
 #else
 #define ck_omcache(c,e) ck_assert_int_eq((c), (e))
 #endif

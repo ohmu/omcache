@@ -154,9 +154,13 @@ int64_t ot_msec(void)
   return ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
   atexit(kill_memcacheds);
+
+  // check logs to stdout, omcache to stderr
+  setlinebuf(stdout);
+  setlinebuf(stderr);
 
   // start two memcacheds in the parent process
   ot_start_memcached(NULL, NULL);
@@ -166,7 +170,12 @@ int main(void)
   for (size_t i = 0; i < sizeof(suites) / sizeof(suites[0]); i ++)
     srunner_add_suite(sr, suites[i]());
 
-  srunner_run_all(sr, CK_NORMAL);
+  srunner_set_log(sr, "-");
+  if (argc < 2)
+    srunner_run_all(sr, CK_VERBOSE);
+  else
+    srunner_run(sr, NULL, argv[1], CK_VERBOSE);
+
   int number_failed = srunner_ntests_failed(sr);
   srunner_free(sr);
 
