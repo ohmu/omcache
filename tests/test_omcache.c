@@ -28,6 +28,7 @@ struct mc_info_s {
 static struct mc_info_s memcacheds[1000];
 static size_t memcached_count;
 static char memcached_version[100];
+static char *memcached_path;
 
 const char *ot_memcached_version(void)
 {
@@ -38,9 +39,6 @@ const char *ot_memcached_version(void)
   pid_t pid = fork();
   if (pid == 0)
     {
-      const char *mc_path = getenv("MEMCACHED_PATH");
-      if (mc_path == NULL)
-        mc_path = "/usr/bin/memcached";
       close(0);
       close(1);
       close(2);
@@ -50,13 +48,13 @@ const char *ot_memcached_version(void)
       close(fd);
       dup2(iop[1], fileno(stdout));
       close(iop[1]);
-      execl(mc_path, "memcached", "-h", NULL);
+      execl(memcached_path, "memcached", "-h", NULL);
       perror("execl");
       _exit(1);
     }
+  close(iop[1]);
   read(iop[0], memcached_version, sizeof(memcached_version));
   close(iop[0]);
-  close(iop[1]);
   memcached_version[sizeof(memcached_version) - 1] = 0;
   char *p = strchr(memcached_version, '\n');
   if (p)
@@ -86,13 +84,10 @@ int ot_start_memcached(const char *addr, pid_t *pidp)
   pid_t pid = fork();
   if (pid == 0)
     {
-      const char *mc_path = getenv("MEMCACHED_PATH");
-      if (mc_path == NULL)
-        mc_path = "/usr/bin/memcached";
       char portbuf[32];
       snprintf(portbuf, sizeof(portbuf), "%d", port);
-      printf("Starting %s on port memcached %s\n", mc_path, portbuf);
-      execl(mc_path, "memcached", "-vp", portbuf, "-l", addr ? addr : "127.0.0.1", NULL);
+      printf("Starting %s on port memcached %s\n", memcached_path, portbuf);
+      execl(memcached_path, "memcached", "-vp", portbuf, "-l", addr ? addr : "127.0.0.1", NULL);
       perror("execl");
       _exit(1);
     }
@@ -159,6 +154,20 @@ int main(int argc, char **argv)
   // check logs to stdout, omcache to stderr
   setlinebuf(stdout);
   setlinebuf(stderr);
+
+  memcached_path = getenv("MEMCACHED_PATH");
+  if (memcached_path == NULL)
+    memcached_path = "/usr/bin/memcached";
+
+  // check memcached version (and presence)
+  if (strcmp(ot_memcached_version(), "") == 0)
+    {
+      fprintf(stderr, "%s: unable to determine memcached version from %s\n"
+                      "Set MEMCACHED_PATH environment variable to the right path\n",
+                      argv[0], memcached_path);
+      return 1;
+    }
+  printf("memcached version: %s\n", ot_memcached_version());
 
   // start two memcacheds in the parent process
   ot_start_memcached(NULL, NULL);
