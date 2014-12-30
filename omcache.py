@@ -9,7 +9,7 @@
 from collections import namedtuple
 from functools import wraps
 from select import select as select_select, error as select_error
-from sys import version_info
+from sys import platform, version_info
 import cffi
 import errno
 import logging
@@ -27,7 +27,11 @@ _ffi.cdef("""
     };
     """)
 _ffi.cdef(open(os.path.join(os.path.dirname(__file__), "omcache_cdef.h")).read())
-_oc = _ffi.dlopen("libomcache.so.0")
+
+if platform == "darwin":
+    _oc = _ffi.dlopen("libomcache.dylib.0")
+else:
+    _oc = _ffi.dlopen("libomcache.so.0")
 
 DELTA_NO_ADD = 0xffffffff
 

@@ -13,7 +13,7 @@ endif
 
 all: $(TEST)
 
-check: $(TEST) ../libomcache.so
+check: $(TEST) ../libomcache.$(SO_EXT)
 	LD_LIBRARY_PATH=.. $(CHECKER) ./$<
 
 $(TEST): $(OBJS) ../libomcache.a

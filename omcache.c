@@ -269,7 +269,11 @@ static inline int64_t omc_msec()
 #ifdef CLOCK_MONOTONIC_COARSE
   if (clock_gettime(CLOCK_MONOTONIC_COARSE, &ts) == -1)
 #endif
+#ifdef CLOCK_MONOTONIC
     clock_gettime(CLOCK_MONOTONIC, &ts);
+#else
+    clock_gettime(CLOCK_REALTIME, &ts);
+#endif
   return ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 }
 

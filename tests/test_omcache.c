@@ -17,6 +17,7 @@
 #include <sys/types.h>
 
 #include "test_omcache.h"
+#include "compat.h"
 
 struct mc_info_s {
   pid_t parent_pid;
@@ -80,8 +81,8 @@ int ot_start_memcached(const char *addr, pid_t *pidp)
       return -1;
     }
   struct timespec ts;
-  clock_gettime(CLOCK_MONOTONIC, &ts);
-  int port = 30000 + (ts.tv_nsec & 0x7fff);
+  clock_gettime(CLOCK_REALTIME, &ts);
+  int port = 30000 + (ts.tv_nsec >> 10 & 0x7fff);
   pid_t pid = fork();
   if (pid == 0)
     {
@@ -147,10 +148,7 @@ omcache_t *ot_init_omcache(int server_count, int log_level)
 int64_t ot_msec(void)
 {
   struct timespec ts;
-#ifdef CLOCK_MONOTONIC_COARSE
-  if (clock_gettime(CLOCK_MONOTONIC_COARSE, &ts) == -1)
-#endif
-    clock_gettime(CLOCK_MONOTONIC, &ts);
+  clock_gettime(CLOCK_REALTIME, &ts);
   return ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 }
 

@@ -12,6 +12,10 @@ else ifeq ($(UNAME_S),SunOS)
   SO_FLAGS = -shared -fPIC -Wl,-h,$(SHLIB_V) -Wl,-M,symbol.map
   WITH_LIBS += -lrt -lsocket
   WITH_CFLAGS += -D_XOPEN_SOURCE=600 -D__EXTENSIONS__
+else ifeq ($(UNAME_S),Darwin)
+  SO_EXT = dylib
+  SO_FLAGS = -dynamiclib
+  WITH_CFLAGS += -D_DARWIN_C_SOURCE
 endif
 
 ifeq ($(WITHOUT_ASYNCNS),)
