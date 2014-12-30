@@ -198,6 +198,10 @@ END_TEST
 
 START_TEST(test_touch)
 {
+  // touch is a new command in 1.4.8
+  if (strcmp(ot_memcached_version(), "1.4.8") < 0)
+    return;
+
   const unsigned char key[] = "test_touch";
   size_t key_len = sizeof(key) - 1;
   const unsigned char *get_val;
@@ -224,6 +228,10 @@ END_TEST
 
 START_TEST(test_gat)
 {
+  // gat is a new command in 1.4.8
+  if (strcmp(ot_memcached_version(), "1.4.8") < 0)
+    return;
+
   const unsigned char key[] = "test_gat";
   size_t key_len = sizeof(key) - 1;
   const unsigned char *get_val;
