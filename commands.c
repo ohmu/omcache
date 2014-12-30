@@ -9,12 +9,12 @@
  *
  */
 
-#include <endian.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 #include <time.h>
 
+#include "compat.h"
 // Note: commands.c only uses the "public" omcache api
 #include "omcache.h"
 #include "memcached_protocol_binary.h"

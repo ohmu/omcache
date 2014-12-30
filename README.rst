@@ -38,8 +38,9 @@ solutions.
 Platform requirements
 =====================
 
-OMcache has been developed and tested on x86-64 Linux, it will probably
-require some changes to work on other platforms.
+OMcache has been developed and tested on x86-64 Linux, but it should work on
+other Linux architectures as well as Solaris on Sparc without any changes.
+Other platforms will probably require some changes.
 
 OMcache can be built with recent versions of GCC and Clang.  Clang and GCC
 versions prior to 4.9 will emit some `spurious warnings`_ about missing

@@ -14,6 +14,7 @@
 
 #include "omcache.h"
 #include "memcached_protocol_binary.h"
+#include "compat.h"
 
 #define MC_PORT "11211"
 

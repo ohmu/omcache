@@ -1,21 +1,17 @@
 short_ver = 0.2.0
 long_ver = $(shell git describe --long 2>/dev/null || echo $(short_ver)-0-unknown-g`git describe --always`)
 
+include compat.mk
+
 PREFIX ?= /usr/local
 LIBDIR ?= $(PREFIX)/lib
 INCLUDEDIR ?= $(PREFIX)/include
 
 STLIB_A = libomcache.a
-SHLIB_SO = libomcache.so
+SHLIB_SO = libomcache.$(SO_EXT)
 SHLIB_V = $(SHLIB_SO).0
 OBJ = omcache.o commands.o dist.o md5.o util.o
-CPPFLAGS ?= -Wall -Wextra
-CFLAGS ?= -g -O2
 
-ifeq ($(WITHOUT_ASYNCNS),)
-WITH_CFLAGS += -DWITH_ASYNCNS
-WITH_LIBS += -lasyncns
-endif
 
 all: $(SHLIB_SO) $(STLIB_A)
 
@@ -27,12 +23,7 @@ $(SHLIB_SO): $(SHLIB_V)
 	ln -fs $(SHLIB_V) $(SHLIB_SO)
 
 $(SHLIB_V): $(OBJ) symbol.map
-	$(CC) $(LDFLAGS) -shared -fPIC \
-		-Wl,-soname=$(SHLIB_V) -Wl,-version-script=symbol.map \
-		$(filter-out symbol.map,$^) -o $@ -lrt $(WITH_LIBS)
-
-%.o: %.c
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(WITH_CFLAGS) -D_GNU_SOURCE=1 -std=gnu99 -fPIC -c $^
+	$(CC) $(LDFLAGS) $(SO_FLAGS) $(filter-out symbol.map,$^) -o $@ $(WITH_LIBS)
 
 install: $(SHLIB_SO)
 	mkdir -p $(DESTDIR)$(LIBDIR) $(DESTDIR)$(INCLUDEDIR)
