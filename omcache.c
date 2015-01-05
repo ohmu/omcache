@@ -1164,9 +1164,6 @@ static int omc_srv_read(omcache_t *mc, omc_srv_t *srv)
           value.flags = be32toh(value.flags);
         }
 
-      // NOTE: increment and decrement commands don't declare the value as
-      // part of extras due to a mismatch in memcached implementation and
-      // documentation: https://github.com/memcached/memcached/pull/92
       if (body_size == 8 &&
           (hdr->response.opcode == PROTOCOL_BINARY_CMD_INCREMENT ||
            hdr->response.opcode == PROTOCOL_BINARY_CMD_DECREMENT ||
