@@ -114,17 +114,19 @@ class DeltaBadValueError(CommandError):
     status = _oc.OMCACHE_DELTA_BAD_VALUE
 
 
-def _to_bytes(s):
-    if isinstance(s, str if version_info[0] >= 3 else unicode):
-        return s.encode("utf8")
-    return s
+if version_info[0] >= 3:
+    _select_errno = lambda e: e.errno
+    _to_bytes = lambda s: s.encode("utf-8") if isinstance(s, str) else s
+    def _to_string(s):
+        msg = _ffi.string(s)
+        if isinstance(msg, bytes):
+            msg = msg.decode("utf-8")
+        return msg
+else:
+    _select_errno = lambda e: e[0]
+    _to_bytes = lambda s: s.encode("utf-8") if isinstance(s, unicode) else s
+    _to_string = _ffi.string
 
-
-def _to_string(s):
-    msg = _ffi.string(s)
-    if version_info[0] >= 3 and isinstance(msg, bytes):
-        msg = msg.decode("utf-8")
-    return msg
 
 if socket.htonl(1) == 1:
     def _htobe64(v):
@@ -317,7 +319,7 @@ class OMcache(object):
             try:
                 self.select(rlist, wlist, [], timeout)
             except select_error as ex:
-                if ex[0] != errno.EINTR:
+                if _select_errno(ex) != errno.EINTR:
                     raise
         ret = _oc.omcache_io(self.omc, requests, request_count, values, value_count, 0)
         self._omc_check(ret, "omcache_io", allowed=[_oc.OMCACHE_AGAIN])
