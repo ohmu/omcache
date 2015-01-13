@@ -1538,7 +1538,7 @@ static int omc_srv_send_noop(omcache_t *mc, omc_srv_t *srv)
     .datatype = PROTOCOL_BINARY_RAW_BYTES,
     .opaque = ++ mc->req_id,
     };
-  struct iovec iov[] = {{ .iov_len = sizeof(hdr), .iov_base = &hdr }};
+  struct iovec iov[] = {{ .iov_len = sizeof(hdr), .iov_base = (void *) &hdr }};
   return omc_srv_submit(mc, srv, iov, 1, 1, &hdr);
 }
 
@@ -1682,7 +1682,8 @@ int omcache_command(omcache_t *mc,
       if (rps->count == 0)
         continue;
 
-      struct iovec iov[min(4 * rps->count, g_iov_max)];
+      size_t iov_size = min(4 * rps->count, g_iov_max);
+      struct iovec iov[iov_size];
       int iov_idx = 0, iov_req_count = 0;
       size_t srv_reqs_sent = 0;
 
@@ -1702,7 +1703,7 @@ int omcache_command(omcache_t *mc,
                         req->header.opcode, req->header.opaque,
                         omc_is_request_quiet(req->header.opcode) ? "(quiet)" : "");
           // construct the iovector
-          iov[iov_idx ++] = (struct iovec) { .iov_base = &req->header, .iov_len = sizeof(req->header) };
+          iov[iov_idx ++] = (struct iovec) { .iov_base = (void *) &req->header, .iov_len = sizeof(req->header) };
           if (req->header.extlen)
             iov[iov_idx ++] = (struct iovec) { .iov_base = (void *) req->extra, .iov_len = req->header.extlen };
           if (h_keylen)

@@ -27,7 +27,7 @@
 #define htobe16(x) OSSwapHostToBigInt16(x)
 #define htobe32(x) OSSwapHostToBigInt32(x)
 #define htobe64(x) OSSwapHostToBigInt64(x)
-#elif defined(__sparc__)
+#elif defined(__sparc__) || defined(__sparc)
 #define be16toh(x) (x)
 #define be32toh(x) (x)
 #define be64toh(x) (x)
