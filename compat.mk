@@ -6,16 +6,20 @@ ifeq ($(UNAME_S),Linux)
   SO_EXT = so
   SO_FLAGS = -shared -fPIC -Wl,-soname=$(SHLIB_V) -Wl,-version-script=symbol.map
   WITH_LIBS += -lrt
-  WITH_CFLAGS += -D_GNU_SOURCE
+  WITH_CFLAGS += -std=gnu99 -D_GNU_SOURCE
 else ifeq ($(UNAME_S),SunOS)
   SO_EXT = so
   SO_FLAGS = -shared -fPIC -Wl,-h,$(SHLIB_V) -Wl,-M,symbol.map
   WITH_LIBS += -lrt -lsocket
-  WITH_CFLAGS += -D_XOPEN_SOURCE=600 -D__EXTENSIONS__
+  ifneq ($(shell $(CC) -V 2>&1 | grep "Sun C"),)
+    WITH_CFLAGS += -xc99
+  else
+    WITH_CFLAGS += -std=gnu99 -D_XOPEN_SOURCE=600 -D__EXTENSIONS__
+  endif
 else ifeq ($(UNAME_S),Darwin)
   SO_EXT = dylib
   SO_FLAGS = -dynamiclib
-  WITH_CFLAGS += -D_DARWIN_C_SOURCE
+  WITH_CFLAGS += -std=gnu99 -D_DARWIN_C_SOURCE
 endif
 
 ifeq ($(WITHOUT_ASYNCNS),)
@@ -24,4 +28,4 @@ ifeq ($(WITHOUT_ASYNCNS),)
 endif
 
 %.o: %.c
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(WITH_CFLAGS) -std=gnu99 -fPIC -c $^
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(WITH_CFLAGS) -fPIC -c $^
