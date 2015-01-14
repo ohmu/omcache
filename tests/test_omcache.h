@@ -18,6 +18,7 @@
 #include <stdlib.h>
 #include <sys/syslog.h>
 #include "omcache.h"
+#include "compat.h"
 
 /* Check 0.9.8 which is available on Debian 6 and 7 doesn't support any
  * unsigned operations or greater / lesser comparisons, but as the macros

@@ -307,7 +307,7 @@ static omc_srv_t *omc_srv_init(const char *hostname)
   return srv;
 }
 
-static void omc_srv_free_addrs(omcache_t *mc __attribute__((unused)), omc_srv_t *srv)
+static void omc_srv_free_addrs(omcache_t *mc omc_attribute_unused, omc_srv_t *srv)
 {
 #ifdef WITH_ASYNCNS
   if (srv->ans_addrs)
@@ -1296,7 +1296,7 @@ int omcache_io(omcache_t *mc,
           timeout_msec = timeout_abs - now;
         }
 
-      int nfds = -1, timeout_poll = -1, polls __attribute__((unused)) = -1;
+      int nfds = -1, timeout_poll = -1, polls omc_attribute_unused = -1;
       struct pollfd *pfds = omcache_poll_fds(mc, &nfds, &timeout_poll);
       if (nfds == 0)
         {
@@ -1434,7 +1434,7 @@ static bool omc_is_request_quiet(uint8_t opcode)
 
 static int omc_srv_submit(omcache_t *mc, omc_srv_t *srv,
                           struct iovec *iov, size_t iov_cnt,
-                          size_t req_cnt __attribute__((unused)),
+                          size_t req_cnt omc_attribute_unused,
                           struct omcache_req_header_s *last_header)
 {
   ssize_t buf_len = srv->send_buffer.w - srv->send_buffer.r;
@@ -1555,7 +1555,7 @@ omcache_server_info_t *omcache_server_info(omcache_t *mc, int server_index)
   return info;
 }
 
-int omcache_server_info_free(omcache_t *mc __attribute__((unused)), omcache_server_info_t *info)
+int omcache_server_info_free(omcache_t *mc omc_attribute_unused, omcache_server_info_t *info)
 {
   free(info->hostname);
   free(info);

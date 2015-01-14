@@ -14,6 +14,12 @@
 
 #include <unistd.h>
 
+#ifdef __GNUC__
+#define omc_attribute_unused __attribute__((unused))
+#else
+#define omc_attribute_unused
+#endif
+
 #define max(a,b) ({__typeof__(a) a_ = (a), b_ = (b); a_ > b_ ? a_ : b_; })
 #define min(a,b) ({__typeof__(a) a_ = (a), b_ = (b); a_ < b_ ? a_ : b_; })
 
@@ -49,8 +55,8 @@
 #define CLOCK_REALTIME 0
 #endif
 
-static __attribute__((unused))
-int clock_gettime(int clk_id __attribute__((unused)), struct timespec *t)
+static omc_attribute_unused
+int clock_gettime(int clk_id omc_attribute_unused, struct timespec *t)
 {
   struct timeval tv;
   int rv = gettimeofday(&tv, NULL);
@@ -67,7 +73,7 @@ int clock_gettime(int clk_id __attribute__((unused)), struct timespec *t)
 #include <stdlib.h>
 #include <string.h>
 
-static __attribute__((unused))
+static omc_attribute_unused
 char *strndup(const char *s, size_t n)
 {
   size_t l = min(n, strlen(s));

@@ -409,7 +409,7 @@ START_TEST(test_buffering)
 }
 END_TEST
 
-static void test_response_callback_cb(omcache_t *mc __attribute__((unused)),
+static void test_response_callback_cb(omcache_t *mc omc_attribute_unused,
                                       omcache_value_t *result, void *context)
 {
   size_t *values_found_p = (size_t *) context;
