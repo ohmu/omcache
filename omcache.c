@@ -43,7 +43,7 @@
         mc->log_cb(mc->log_context, (pri), log_msg_); \
         free(log_msg_); \
       } \
-    } NULL; })
+    } })
 #define omc_srv_log(pri,srv,fmt,...) \
     omc_log(pri, "[%s:%s] " fmt, (srv)->hostname, (srv)->port, __VA_ARGS__)
 

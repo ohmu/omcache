@@ -220,8 +220,8 @@ END_TEST
 Suite *ot_suite_failures(void)
 {
   Suite *s = suite_create("Failures");
-  tcase_set_timeout(ot_tcase_add(s, test_suspended_memcache), 60);
-  tcase_set_timeout(ot_tcase_add(s, test_all_backends_fail), 60);
+  ot_tcase_add_timeout(s, test_suspended_memcache, 60);
+  ot_tcase_add_timeout(s, test_all_backends_fail, 60);
 
   return s;
 }

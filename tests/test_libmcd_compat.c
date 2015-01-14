@@ -153,8 +153,8 @@ END_TEST
 Suite *ot_suite_libmcd_compat(void)
 {
   Suite *s = suite_create("libmemcached compat");
-  tcase_set_timeout(ot_tcase_add(s, test_ketama_compatibility), 60);
-  tcase_set_timeout(ot_tcase_add(s, test_ketama_weighted_compatibility), 60);
+  ot_tcase_add_timeout(s, test_ketama_compatibility, 60);
+  ot_tcase_add_timeout(s, test_ketama_weighted_compatibility, 60);
   return s;
 }
 #endif // WITH_LIBMEMCACHED

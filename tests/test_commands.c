@@ -478,8 +478,8 @@ Suite *ot_suite_commands(void)
   ot_tcase_add(s, test_cas_and_flags);
   ot_tcase_add(s, test_add_and_replace);
   ot_tcase_add(s, test_append_and_prepend);
-  tcase_set_timeout(ot_tcase_add(s, test_touch), 10);
-  tcase_set_timeout(ot_tcase_add(s, test_gat), 10);
+  ot_tcase_add_timeout(s, test_touch, 10);
+  ot_tcase_add_timeout(s, test_gat, 10);
   ot_tcase_add(s, test_increment_and_decrement);
   ot_tcase_add(s, test_req_id_wraparound);
   ot_tcase_add(s, test_buffering);

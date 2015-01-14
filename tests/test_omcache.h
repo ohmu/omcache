@@ -47,11 +47,13 @@
 
 #define ck_omcache_ok_or_again(c) ({ int omc_ret1 = (c); if (omc_ret1 != OMCACHE_OK) ck_omcache(omc_ret1, OMCACHE_AGAIN); })
 
-#define ot_tcase_add(s,f) \
+#define ot_tcase_add_timeout(s,f,t) \
   ({  TCase *tc_ = tcase_create(#f); \
       tcase_add_test(tc_, f); \
       suite_add_tcase((s), tc_); \
-      tc_; })
+      if (t) tcase_set_timeout(tc_, (t)); \
+  })
+#define ot_tcase_add(s,f) ot_tcase_add_timeout(s, f, 0)
 
 typedef const unsigned char cuc;
 

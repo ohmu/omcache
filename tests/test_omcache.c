@@ -160,7 +160,7 @@ int main(int argc, char **argv)
     memcached_path = "/usr/bin/memcached";
 
   // check memcached version (and presence)
-  if (strcmp(ot_memcached_version(), "") == 0)
+  if (ot_memcached_version()[0] == 0)
     {
       fprintf(stderr, "%s: unable to determine memcached version from %s\n"
                       "Set MEMCACHED_PATH environment variable to the right path\n",
