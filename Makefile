@@ -6,6 +6,7 @@ include compat.mk
 PREFIX ?= /usr/local
 LIBDIR ?= $(PREFIX)/lib
 INCLUDEDIR ?= $(PREFIX)/include
+PYTHON ?= python
 
 STLIB_A = libomcache.a
 SHLIB_SO = libomcache.$(SO_EXT)
@@ -90,3 +91,7 @@ check-coverity:
 
 check-pylint:
 	pylint --rcfile pylintrc *.py
+	PYTHONPATH=. pylint --rcfile pylintrc tests/python
+
+check-python:
+	LD_LIBRARY_PATH=. PYTHONPATH=. $(PYTHON) -m pytest -vv tests/python
