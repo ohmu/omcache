@@ -421,7 +421,7 @@ class OMcache(object):
         extra = _ffi.new("uint32_t[]", 2)
         extra[0] = socket.htonl(flags)
         extra[1] = socket.htonl(expiration)
-        return self._request(CMD_SET, key=_to_bytes(key), data=_to_bytes(value), extra=extra, cas=cas)
+        return self._request(opcode, key=_to_bytes(key), data=_to_bytes(value), extra=extra, cas=cas)
 
     def set(self, key, value, expiration=0, flags=0, cas=0, timeout=None):
         return self._omc_set(key, value, expiration, flags, cas, timeout, CMD_SET, "set")
