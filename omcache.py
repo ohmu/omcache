@@ -432,11 +432,13 @@ class OMcache(object):
     def replace(self, key, value, expiration=0, flags=0, timeout=None):
         return self._omc_set(key, value, expiration, flags, 0, timeout, CMD_REPLACE, "replace")
 
+    @_omc_command
     def append(self, key, value, cas=0, timeout=None):
-        return self._omc_set(key, value, 0, 0, cas, timeout, CMD_APPEND, "append")
+        return self._request(CMD_APPEND, key=_to_bytes(key), data=_to_bytes(value), cas=cas)
 
+    @_omc_command
     def prepend(self, key, value, cas=0, timeout=None):
-        return self._omc_set(key, value, 0, 0, cas, timeout, CMD_PREPEND, "prepend")
+        return self._request(CMD_PREPEND, key=_to_bytes(key), data=_to_bytes(value), cas=cas)
 
     @_omc_command
     def delete(self, key, timeout=None):
