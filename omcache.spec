@@ -6,7 +6,7 @@ Group:          System Environment/Libraries
 URL:            https://github.com/ohmu/omcache/
 License:        ASL 2.0
 Source0:        omcache-rpm-src.tar.gz
-BuildRequires:  check-devel, libasyncns-devel
+BuildRequires:  check-devel, libasyncns-devel, memcached
 
 %description
 OMcache is a low level C library for accessing memcached servers.  The goals
@@ -26,21 +26,23 @@ Development libraries and headers for the OMcache memcache client library.
 Summary:	memcache client library for python 2.x
 Group:		Development/Languages
 BuildArch:	noarch
-BuildRequires:	python-devel
+BuildRequires:	python-devel, pytest, python-cffi
 Requires:	python-cffi, %{name} = %{version}
 
 %description -n python-omcache
 Python 2.x bindings for the OMcache memcache client library.
 
+%if %{?python3_sitelib:1}0
 %package -n python3-omcache
 Summary:	memcache client library for python 3.x
 Group:		Development/Languages
 BuildArch:	noarch
-BuildRequires:	python3-devel
+BuildRequires:	python3-devel, python3-pytest, python3-cffi
 Requires:	python3-cffi, %{name} = %{version}
 
 %description -n python3-omcache
 Python 3.x bindings for the OMcache memcache client library.
+%endif
 
 %prep
 %setup -q -n omcache
@@ -52,10 +54,11 @@ make
 rm -rf %{buildroot}
 make install DESTDIR=%{buildroot} \
     PREFIX=%{_prefix} LIBDIR=%{_libdir} \
-    PYTHONDIRS="%{python2_sitelib} %{python3_sitelib}"
+    PYTHONDIRS="%{python2_sitelib} %{?python3_sitelib}"
 
 %check
 make check
+make check-python PYTHON=python2
 
 %clean
 rm -rf %{buildroot}
@@ -76,11 +79,18 @@ rm -rf %{buildroot}
 %defattr(-,root,root,-)
 %{python2_sitelib}/omcache*
 
+%if %{?python3_sitelib:1}0
 %files -n python3-omcache
 %defattr(-,root,root,-)
 %{python3_sitelib}/omcache*
 %{python3_sitelib}/__pycache__/omcache*
+%endif
 
 %changelog
+* Wed Jan 28 2015 Oskari Saarenmaa <os@ohmu.fi> - 0.2.0-15-g34d33df
+- Don't package python3 bindings if python3_sitelib isn't defined
+- Run python tests and BuildRequire pytest and python-cffi
+- BuildRequire memcached, it's needed for make check
+
 * Mon Oct 13 2014 Oskari Saarenmaa <os@ohmu.fi> - 0-unknown
 - Initial.
