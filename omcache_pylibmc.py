@@ -29,8 +29,8 @@ if version_info[0] >= 3:
     _i_types = int
     _u_type = str
 else:
-    _i_types = (int, long)
-    _u_type = unicode
+    _i_types = (int, long)  # pylint: disable=E0602
+    _u_type = unicode  # pylint: disable=E0602
 
 def _s_value(value):
     flags = 0

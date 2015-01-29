@@ -61,20 +61,20 @@ class TestOmcache(OMcacheCase):
         with raises(omcache.NotFoundError):
             oc.get("test_arsd")
         oc.add("test_arsd", "added")
-        assert oc.get("test_arsd") == "added"
+        assert oc.get("test_arsd") == b"added"
         oc.set("test_arsd", "set")
-        assert oc.get("test_arsd") == "set"
+        assert oc.get("test_arsd") == b"set"
         oc.replace("test_arsd", "replaced")
-        assert oc.get("test_arsd") == "replaced"
+        assert oc.get("test_arsd") == b"replaced"
         with raises(omcache.KeyExistsError):
             oc.add("test_arsd", "foobar")
-        assert oc.get("test_arsd") == "replaced"
+        assert oc.get("test_arsd") == b"replaced"
         oc.delete("test_arsd")
         with raises(omcache.NotFoundError):
             oc.delete("test_arsd")
         oc.set("test_arsd", "arsd", flags=531)
         res, flags, cas = oc.get("test_arsd", flags=True, cas=True)  # pylint: disable=W0632
-        assert res == "arsd"
+        assert res == b"arsd"
         assert flags == 531
         assert cas > 0
         res, flags = oc.get("test_arsd", flags=True)  # pylint: disable=W0632
@@ -88,49 +88,49 @@ class TestOmcache(OMcacheCase):
         with raises(omcache.KeyExistsError):
             oc.set("test_cas", "xxx", cas=42424242)
         res, cas1 = oc.get("test_cas", cas=True)  # pylint: disable=W0632
-        assert res == "xxx"
+        assert res == b"xxx"
         assert cas1 > 0
         oc.set("test_cas", "42", cas=cas1)
         with raises(omcache.KeyExistsError):
             oc.set("test_cas", "zzz", cas=cas1)
         res, cas2 = oc.get("test_cas", cas=True)  # pylint: disable=W0632
-        assert res == "42"
+        assert res == b"42"
         assert cas2 > 0
         assert cas2 != cas1
         oc.increment("test_cas", 8)
         with raises(omcache.KeyExistsError):
             oc.set("test_cas", "zzz", cas=cas2)
         res, cas3 = oc.get("test_cas", cas=True)  # pylint: disable=W0632
-        assert res == "50"
+        assert res == b"50"
         assert cas3 > 0
         assert cas3 != cas2
 
     def test_touch(self):
         oc = omcache.OMcache([self.get_memcached()], self.log)
         oc.set("test_touch", "qwerty", expiration=2)
-        assert oc.get("test_touch") == "qwerty"
+        assert oc.get("test_touch") == b"qwerty"
         sleep(2)
         with raises(omcache.NotFoundError):
             oc.get("test_touch")
         oc.set("test_touch", "qwerty", expiration=1)
-        assert oc.get("test_touch") == "qwerty"
+        assert oc.get("test_touch") == b"qwerty"
         oc.touch("test_touch", expiration=3)
         sleep(2)
-        assert oc.get("test_touch") == "qwerty"
+        assert oc.get("test_touch") == b"qwerty"
 
     def test_append_prepend(self):
         oc = omcache.OMcache([self.get_memcached()], self.log)
         oc.set("test_ap", "asdf")
-        assert oc.get("test_ap") == "asdf"
+        assert oc.get("test_ap") == b"asdf"
         oc.append("test_ap", "zxcvb")
-        assert oc.get("test_ap") == "asdfzxcvb"
+        assert oc.get("test_ap") == b"asdfzxcvb"
         oc.prepend("test_ap", "qwerty")
-        assert oc.get("test_ap") == "qwertyasdfzxcvb"
+        assert oc.get("test_ap") == b"qwertyasdfzxcvb"
 
     def test_multi(self):
         oc = omcache.OMcache([self.get_memcached(), self.get_memcached()], self.log)
         item_count = 123
-        val = str(random.random())
+        val = str(random.random()).encode("utf-8")
         for i in range(item_count):
             oc.set("test_multi_{0}".format(i * 2), val, flags=i)
         keys = ["test_multi_{0}".format(i) for i in range(item_count * 2)]
@@ -138,12 +138,12 @@ class TestOmcache(OMcacheCase):
         results = oc.get_multi(keys)
         assert len(results) == item_count
         for i in range(item_count):
-            assert results["test_multi_{0}".format(i * 2)] == val
+            assert results["test_multi_{0}".format(i * 2).encode("utf-8")] == val
         # test with flags and cas
         results = oc.get_multi(keys, flags=True)
         assert len(results) == item_count
         for i in range(item_count):
-            assert results["test_multi_{0}".format(i * 2)] == (val, i)
+            assert results["test_multi_{0}".format(i * 2).encode("utf-8")] == (val, i)
         results = oc.get_multi(keys, cas=True)
         assert len(results) == item_count
         # count the number of distinct cas values, we can't just compare
@@ -151,8 +151,7 @@ class TestOmcache(OMcacheCase):
         # which may use the same cas values
         casses = set()
         for i in range(item_count):
-            res, cas = results["test_multi_{0}".format(i * 2)]
-            print "#{0} c{1}".format(i, cas)
+            res, cas = results["test_multi_{0}".format(i * 2).encode("utf-8")]
             assert res == val
             casses.add(cas)
         assert len(casses) > item_count / 3
@@ -160,7 +159,7 @@ class TestOmcache(OMcacheCase):
         assert len(results) == item_count
         casses = set()
         for i in range(item_count):
-            res, flags, cas = results["test_multi_{0}".format(i * 2)]
+            res, flags, cas = results["test_multi_{0}".format(i * 2).encode("utf-8")]
             assert res == val
             assert flags == i
             casses.add(cas)
@@ -199,7 +198,7 @@ class TestOmcache(OMcacheCase):
             if value not in counts:
                 counts[value] = 0
             counts[value] += 1
-        assert set(["ketama", "ketama_weighted", "ketama_pre1010"]).issuperset(counts)
-        assert counts["ketama"] >= item_count / 10
-        assert counts["ketama_weighted"] >= item_count / 10
-        assert counts["ketama_pre1010"] >= item_count / 10
+        assert set([b"ketama", b"ketama_weighted", b"ketama_pre1010"]).issuperset(counts)
+        assert counts[b"ketama"] >= item_count / 10
+        assert counts[b"ketama_weighted"] >= item_count / 10
+        assert counts[b"ketama_pre1010"] >= item_count / 10

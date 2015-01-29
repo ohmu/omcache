@@ -90,8 +90,8 @@ check-coverity:
 	$(RM) -r cov-int omcache-cov-int.tar.gz
 
 check-pylint:
-	pylint --rcfile pylintrc *.py
-	PYTHONPATH=. pylint --rcfile pylintrc tests/python
+	$(PYTHON) -m pylint --rcfile pylintrc *.py
+	PYTHONPATH=. $(PYTHON) -m pylint --rcfile pylintrc tests/python
 
 check-python:
 	LD_LIBRARY_PATH=. PYTHONPATH=. $(PYTHON) -m pytest -vv tests/python

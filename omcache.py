@@ -124,7 +124,7 @@ if version_info[0] >= 3:
         return msg
 else:
     _select_errno = lambda e: e[0]
-    _to_bytes = lambda s: s.encode("utf-8") if isinstance(s, unicode) else s
+    _to_bytes = lambda s: s.encode("utf-8") if isinstance(s, unicode) else s   # pylint: disable=E0602
     _to_string = _ffi.string
 
 

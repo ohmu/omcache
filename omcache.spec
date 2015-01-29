@@ -26,7 +26,7 @@ Development libraries and headers for the OMcache memcache client library.
 Summary:	memcache client library for python 2.x
 Group:		Development/Languages
 BuildArch:	noarch
-BuildRequires:	python-devel, pytest, python-cffi
+BuildRequires:	python-devel, pylint, pytest, python-cffi
 Requires:	python-cffi, %{name} = %{version}
 
 %description -n python-omcache
@@ -37,7 +37,7 @@ Python 2.x bindings for the OMcache memcache client library.
 Summary:	memcache client library for python 3.x
 Group:		Development/Languages
 BuildArch:	noarch
-BuildRequires:	python3-devel, python3-pytest, python3-cffi
+BuildRequires:	python3-devel, python3-pylint, python3-pytest, python3-cffi
 Requires:	python3-cffi, %{name} = %{version}
 
 %description -n python3-omcache
@@ -58,7 +58,10 @@ make install DESTDIR=%{buildroot} \
 
 %check
 make check
-make check-python PYTHON=python2
+make check-pylint check-python PYTHON=python2
+%if %{?python3_sitelib:1}0
+make check-pylint check-python PYTHON=python3
+%endif
 
 %clean
 rm -rf %{buildroot}
