@@ -1,10 +1,32 @@
-language: c
-compiler:
-  - gcc
-  - clang
-
 script: make -f .travis.mk
 
-os:
-  - linux
-  - osx
+matrix:
+  include:
+    - os: osx
+      language: c
+      compiler: clang
+    - os: linux
+      language: python
+      python: "2.6"
+      compiler: gcc
+      env: CC=gcc
+    - os: linux
+      language: python
+      python: "2.7"
+      compiler: clang
+      env: CC=clang
+    - os: linux
+      language: python
+      python: "3.3"
+      compiler: gcc
+      env: CC=gcc
+    - os: linux
+      language: python
+      python: "3.4"
+      compiler: clang
+      env: CC=clang
+    - os: linux
+      language: python
+      python: "pypy"
+      compiler: clang
+      env: CC=clang
