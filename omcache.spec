@@ -68,7 +68,7 @@ rm -rf %{buildroot}
 
 %files
 %defattr(-,root,root,-)
-%doc README.rst LICENSE
+%doc README.rst LICENSE NEWS
 %{_libdir}/libomcache.so.0
 
 %files devel

@@ -1,0 +1,34 @@
+OMcache 0.3.0 (unreleased)
+==========================
+
+* Support for OS X and Solaris
+* Support for Python 2.6, 2.7 and 3.3+ and PyPy
+* Unit tests for Python and related fixes for the Python bindings
+* Automatic tests on travis-ci.org for all supported Python versions
+* Various bug fixes
+
+OMcache 0.2.0 (2014-12-21)
+==========================
+
+* Support for asynchronous name resolution using libasyncns
+* Added support for append, prepend, touch and gat commands
+* Improved and fixed timeout handling
+* Improved handling of "multi" commands
+* Better handling of error cases
+* Rewritten Python bindings for async support using gevent or other
+  mechanisms
+* Various bug fixes
+
+OMcache 0.1.0 (2014-11-13)
+==========================
+
+* Initial (unstable) release
+* Only tested on recent Linux distributions on x86-64
+* Support for most (but not all) memcached commands
+* C library with Python bindings implemented in CFFI
+' Fedora and Debian packaging
+* Non-blocking API
+* Stable (without promises before 1.0 release) API and ABI
+* Support for consistent key distribution to multiple servers
+* Compatibility with libmemcached and pylibmc in a number of different
+  configurations
