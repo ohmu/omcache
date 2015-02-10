@@ -1,10 +1,12 @@
-OMcache |BuildStatus|_ |CoverityStatus|_
-========================================
+OMcache |BuildStatus|_ |CoverityStatus|_ |DocBadge|_
+====================================================
 
 .. |CoverityStatus| image:: https://scan.coverity.com/projects/3408/badge.svg
 .. _CoverityStatus: https://scan.coverity.com/projects/3408/
 .. |BuildStatus| image:: https://travis-ci.org/ohmu/omcache.png?branch=master
 .. _BuildStatus: https://travis-ci.org/ohmu/omcache
+.. |DocBadge| image:: https://readthedocs.org/projects/omcache/badge/?version=latest
+.. _DocBadge: http://omcache.readthedocs.org/en/latest/
 
 OMcache is a C and Python library for accessing memcached servers.  The
 goals of the OMcache project are a stable API and ABI and 'easy' integration

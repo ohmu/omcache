@@ -1,0 +1,4 @@
+INPUT = ../omcache_cdef.h
+EXTRACT_ALL = YES
+GENERATE_XML = YES
+XML_OUTPUT = omcache_c_api_xml

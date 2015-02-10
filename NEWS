@@ -5,6 +5,7 @@ OMcache 0.3.0 (unreleased)
 * Support for Python 2.6, 2.7 and 3.3+ and PyPy
 * Unit tests for Python and related fixes for the Python bindings
 * Automatic tests on travis-ci.org for all supported Python versions
+* C API reference documentation generation
 * Various bug fixes
 
 OMcache 0.2.0 (2014-12-21)
