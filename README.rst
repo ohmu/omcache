@@ -12,7 +12,7 @@ OMcache is a C and Python library for accessing memcached servers.  The
 goals of the OMcache project are a stable API and ABI and 'easy' integration
 into complex applications and systems.  OMcache is meant to be used as a
 middleware layer to provide redundancy and consistency to a memcached server
-cluster.  OMcache specifically tries to avoid ABI brekage and does not mask
+cluster.  OMcache specifically tries to avoid ABI breakage and does not mask
 any signals or call blocking functions to help integrating it into other
 solutions.
 
