@@ -26,7 +26,7 @@ extern "C" {
 #endif // __cplusplus
 
 // CFFI can't handle defines yet
-#define OMCACHE_VERSION 0x00000200  // Version 0.2.0
+#define OMCACHE_VERSION 0x00000300  // Version 0.3.0
 #define OMCACHE_DELTA_NO_ADD 0xffffffffu
 
 #endif // !_OMCACHE_H
