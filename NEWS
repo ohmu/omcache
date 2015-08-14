@@ -1,3 +1,8 @@
+OMcache 0.X (unreleased)
+========================
+
+* Compile-time configurable timeouts for libmemcached compat wrapper
+
 OMcache 0.3.0 (2015-02-15)
 ==========================
 

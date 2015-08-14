@@ -1,7 +1,7 @@
 /*
  * omcache_libmemcached.h - a kludgy libmemcached API compatibility layer
  *
- * Copyright (c) 2013-2014, Oskari Saarenmaa <os@ohmu.fi>
+ * Copyright (c) 2013-2015, Oskari Saarenmaa <os@ohmu.fi>
  * All rights reserved.
  *
  * This file is under the Apache License, Version 2.0.
@@ -26,6 +26,19 @@
 #define MEMCACHED_END -1
 #define MEMCACHED_SOME_ERRORS -1
 #define LIBMEMCACHED_VERSION_HEX 0x01000003
+
+// how long should we wait for commands to complete?
+#ifndef MEMCACHED_COMMAND_TIMEOUT
+#define MEMCACHED_COMMAND_TIMEOUT -1
+#endif // !MEMCACHED_COMMAND_TIMEOUT
+
+#ifndef MEMCACHED_READ_TIMEOUT
+#define MEMCACHED_READ_TIMEOUT MEMCACHED_COMMAND_TIMEOUT
+#endif // !MEMCACHED_READ_TIMEOUT
+
+#ifndef MEMCACHED_WRITE_TIMEOUT
+#define MEMCACHED_WRITE_TIMEOUT MEMCACHED_COMMAND_TIMEOUT
+#endif // !MEMCACHED_WRITE_TIMEOUT
 
 // memcached functions usually uses signed char *s, omcache uses unsigned char *s
 #define omc_cc_to_cuc(v) (const unsigned char *) ({ const char *cc_ = (v); cc_; })
@@ -57,35 +70,35 @@ typedef const char *memcached_server_distribution_t;
         rc_ = omcache_flush_all((mc), (expire), srvidx_, -1) ; \
     (rc_ == OMCACHE_NO_SERVERS) ? OMCACHE_OK : rc_; })
 #define memcached_increment(mc,key,key_len,offset,val) \
-    omcache_increment((mc), omc_cc_to_cuc(key), (key_len), (offset), 0, OMCACHE_DELTA_NO_ADD, (val), 0)
+    omcache_increment((mc), omc_cc_to_cuc(key), (key_len), (offset), 0, OMCACHE_DELTA_NO_ADD, (val), MEMCACHED_WRITE_TIMEOUT)
 #define memcached_increment_with_initial(mc,key,key_len,offset,initial,expire,val) \
-    omcache_increment((mc), omc_cc_to_cuc(key), (key_len), (offset), (initial), (expire), (val), 0)
+    omcache_increment((mc), omc_cc_to_cuc(key), (key_len), (offset), (initial), (expire), (val), MEMCACHED_WRITE_TIMEOUT)
 #define memcached_decrement(mc,key,key_len,offset,val) \
-    omcache_decrement((mc), omc_cc_to_cuc(key), (key_len), (offset), 0, OMCACHE_DELTA_NO_ADD, (val), 0)
+    omcache_decrement((mc), omc_cc_to_cuc(key), (key_len), (offset), 0, OMCACHE_DELTA_NO_ADD, (val), MEMCACHED_WRITE_TIMEOUT)
 #define memcached_decrement_with_initial(mc,key,key_len,offset,initial,expire,val) \
-    omcache_decrement((mc), omc_cc_to_cuc(key), (key_len), (offset), (initial), (expire), (val), 0)
+    omcache_decrement((mc), omc_cc_to_cuc(key), (key_len), (offset), (initial), (expire), (val), MEMCACHED_WRITE_TIMEOUT)
 #define memcached_add(mc,key,key_len,val,val_len,expire,flags) \
-    omcache_add((mc), omc_cc_to_cuc(key), (key_len), omc_cc_to_cuc(val), (val_len), (expire), (flags), 0)
+    omcache_add((mc), omc_cc_to_cuc(key), (key_len), omc_cc_to_cuc(val), (val_len), (expire), (flags), MEMCACHED_WRITE_TIMEOUT)
 #define memcached_set(mc,key,key_len,val,val_len,expire,flags) \
-    omcache_set((mc), omc_cc_to_cuc(key), (key_len), omc_cc_to_cuc(val), (val_len), (expire), (flags), 0, 0)
+    omcache_set((mc), omc_cc_to_cuc(key), (key_len), omc_cc_to_cuc(val), (val_len), (expire), (flags), 0, MEMCACHED_WRITE_TIMEOUT)
 #define memcached_replace(mc,key,key_len,val,val_len,expire,flags) \
-    omcache_replace((mc), omc_cc_to_cuc(key), (key_len), omc_cc_to_cuc(val), (val_len), (expire), (flags), 0)
+    omcache_replace((mc), omc_cc_to_cuc(key), (key_len), omc_cc_to_cuc(val), (val_len), (expire), (flags), MEMCACHED_WRITE_TIMEOUT)
 #define memcached_touch(mc,key,key_len,expire) \
     omcache_touch((mc), omc_cc_to_cuc(key), (key_len), (expire))
 // NOTE: memcached protocol doesn't have expiration for delete
 #define memcached_delete(mc,key,key_len,expire) \
-    ({ omc_unused_var(expire); omcache_delete((mc), omc_cc_to_cuc(key), (key_len), 0); })
+    ({ omc_unused_var(expire); omcache_delete((mc), omc_cc_to_cuc(key), (key_len), MEMCACHED_WRITE_TIMEOUT); })
 // NOTE: memcached protocol doesn't have expiration or flags for append and prepend
 #define memcached_append(mc,key,key_len,val,val_len,expire,flags) \
     ({  omc_unused_var(expire); omc_unused_var(flags); \
-        omcache_append((mc), omc_cc_to_cuc(key), (key_len), omc_cc_to_cuc(val), (val_len), 0, 0); })
+        omcache_append((mc), omc_cc_to_cuc(key), (key_len), omc_cc_to_cuc(val), (val_len), 0, MEMCACHED_WRITE_TIMEOUT); })
 #define memcached_prepend(mc,key,key_len,val,val_len,expire,flags) \
     ({  omc_unused_var(expire); omc_unused_var(flags); \
-        omcache_prepend((mc), omc_cc_to_cuc(key), (key_len), omc_cc_to_cuc(val), (val_len), 0, 0); })
+        omcache_prepend((mc), omc_cc_to_cuc(key), (key_len), omc_cc_to_cuc(val), (val_len), 0, MEMCACHED_WRITE_TIMEOUT); })
 
 #define memcached_get(mc,key,key_len,r_len,flags,rc) \
     ({  const unsigned char *val_; \
-        *rc = omcache_get((mc), omc_cc_to_cuc(key), (key_len), &val_, (r_len), (flags), NULL, -1); \
+        *rc = omcache_get((mc), omc_cc_to_cuc(key), (key_len), &val_, (r_len), (flags), NULL, MEMCACHED_READ_TIMEOUT); \
         memcpy(malloc(*(r_len)), val_, *(r_len)); })
 
 #define memcached_servers_parse(s) strdup(s)
