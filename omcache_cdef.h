@@ -184,7 +184,7 @@ typedef uint32_t (omc_ketama_point_hash_func)(const char *hostname, const char *
  */
 typedef uint32_t (omc_ketama_key_hash_func)(const unsigned char *key, size_t key_len);
 
-typedef const struct omcache_dist_s
+typedef struct omcache_dist_s
 {
   int omcache_version;         ///< OMcache client version
   uint32_t points_per_server;  ///< Number of ketama points per server
